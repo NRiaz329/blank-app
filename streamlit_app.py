@@ -1,65 +1,53 @@
 import streamlit as st
 import pandas as pd
-import json
 
-# Define the function to handle data export based on the selected format
+# Function to validate email format
+def is_valid_email(email):
+    import re
+    pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+    return re.match(pattern, email) is not None
 
-def export_data(data, export_type):
-    if export_type == 'CSV':
-        return data.to_csv(index=False)
-    elif export_type == 'TXT':
-        return data.to_string(index=False)
-    elif export_type == 'JSON':
-        return data.to_json(orient='records')
-    elif export_type == 'Excel':
-        return data.to_excel(index=False)
+# Function to verify emails and update results
+def verify_emails(email_list):
+    results = []
+    for email in email_list:
+        valid = is_valid_email(email)
+        results.append((email, valid))
+    return results
 
-# Streamlit application with tabs for different functionalities
-st.title('Enhanced Streamlit App')
+# Streamlit app layout
+st.title('Email Verification App')
 
-# Tabs for UI navigation
-tabs = st.tabs(['Single Verification', 'Bulk Upload', 'Paste Input', 'Results Export'])
-
-# Single Verification Tab
-with tabs[0]:
-    st.subheader('Single Verification')
-    input_value = st.text_input('Enter value to verify')
-    if st.button('Verify'):
-        if input_value:
-            st.success(f'Value verified: {input_value}')
-        else:
-            st.error('Please enter a value.')
-
-# Bulk Upload Tab
-with tabs[1]:
-    st.subheader('Bulk Upload')
-    uploaded_file = st.file_uploader('Choose a file', type='csv')
+# Email upload section
+upload_type = st.selectbox('Select Input Type:', ('Paste Emails', 'Upload CSV'))
+if upload_type == 'Paste Emails':
+    emails_input = st.text_area('Enter emails (one per line):')
+    email_list = emails_input.split('\n') if emails_input else []
+elif upload_type == 'Upload CSV':
+    uploaded_file = st.file_uploader('Choose a CSV file:', type='csv')
     if uploaded_file is not None:
-        data = pd.read_csv(uploaded_file)
-        st.write(data)
-        if st.button('Process Data'):
-            st.success('Data processed successfully!')
+        df = pd.read_csv(uploaded_file)
+        email_list = df.get('email').tolist()  # Assuming the column header is 'email'
 
-# Paste Input Tab
-with tabs[2]:
-    st.subheader('Paste Input')
-    text_area_input = st.text_area('Paste your inputs here')
-    if st.button('Submit'):  
-        # Process inputs from the text area
-        inputs = text_area_input.split('\n')
-        st.success('Inputs received!')
+# Verification button
+if st.button('Verify Emails'):
+    with st.spinner('Verifying emails...'):
+        results = verify_emails(email_list)
+    df_results = pd.DataFrame(results, columns=['Email', 'Valid'])
+    st.write(df_results)
 
-# Results Export Tab
-with tabs[3]:
-    st.subheader('Results Export')
-    if 'data' in locals():  # Check if there is data available for export
-        export_type = st.selectbox('Select export format', ['CSV', 'TXT', 'JSON', 'Excel'])
-        if st.button('Export Data'):
-            exported_data = export_data(data, export_type)
-            st.download_button(
-                label='Download Data',
-                data=exported_data,
-                file_name=f'data_export.{export_type.lower()}',
-                mime='application/octet-stream'
-            )
-
+    # Export options
+    if st.button('Export Results'):
+        export_format = st.selectbox('Select Export Format:', ('CSV', 'JSON', 'TXT', 'Excel'))
+        if export_format == 'CSV':
+            df_results.to_csv('results.csv', index=False)
+            st.success('Results exported to results.csv')
+        elif export_format == 'JSON':
+            df_results.to_json('results.json', orient='records')
+            st.success('Results exported to results.json')
+        elif export_format == 'TXT':
+            df_results.to_csv('results.txt', index=False, sep='\t')
+            st.success('Results exported to results.txt')
+        elif export_format == 'Excel':
+            df_results.to_excel('results.xlsx', index=False)
+            st.success('Results exported to results.xlsx')
