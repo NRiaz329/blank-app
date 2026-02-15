@@ -1408,50 +1408,157 @@ def process_csv(uploaded_file, client_id=None, ip=None):
 # SINGLE EMAIL TEST
 # ==========================
 
-def test_single_email(client_id=None, ip=None):
-    st.markdown("### 🔍 Test Single Email")
-    test_email = st.text_input("Enter email to test", placeholder="example@domain.com")
+def test_bulk_emails(client_id=None, ip=None):
+    st.markdown("### 🔍 Bulk Email Verification (One Per Row)")
+    st.info("💡 **Tip:** Enter one email per line. You can paste multiple emails at once!")
     
-    if st.button("Verify Email") and test_email:
-        with st.spinner("Verifying..."):
-            result = verify_email(test_email, client_id=client_id, ip=ip)
-            
-            if result:
-                col1, col2 = st.columns([2, 1])
+    # Use text area for multiple emails
+    email_input = st.text_area(
+        "Enter emails (one per line)",
+        placeholder="example1@gmail.com\nexample2@yahoo.com\nexample3@hotmail.com",
+        height=200,
+        key=f"bulk_email_input_{client_id}"
+    )
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        verify_button = st.button("🚀 Verify All Emails", type="primary", use_container_width=True)
+    with col2:
+        if email_input:
+            email_list = [e.strip() for e in email_input.strip().split('\n') if e.strip()]
+            st.metric("Emails to verify", len(email_list))
+    
+    if verify_button:
+        if not email_input.strip():
+            st.error("⚠️ Please enter at least one email address")
+            return
+        
+        # Parse emails
+        emails = [e.strip() for e in email_input.strip().split('\n') if e.strip()]
+        
+        if not emails:
+            st.error("⚠️ No valid emails found")
+            return
+        
+        st.markdown(f"### 📊 Verifying {len(emails)} email(s)...")
+        
+        results = []
+        placeholder = st.empty()
+        progress_bar = st.progress(0)
+        
+        for i, email in enumerate(emails):
+            try:
+                result = verify_email(email, client_id=client_id, ip=ip)
                 
-                with col1:
-                    if result["Status"] == "VALID":
-                        st.success(f"✅ {result['Email']} - VALID")
-                    elif result["Status"] == "RISKY":
-                        st.warning(f"⚠️ {result['Email']} - RISKY")
-                    else:
-                        st.error(f"❌ {result['Email']} - INVALID")
+                if result:
+                    results.append(result)
                     
-                    st.markdown(f"**Validation Details:** {result['Reason']}")
+                    # Show live progress
+                    color = "green" if result["AI Prediction"]=="VALID" else "orange" if result["AI Prediction"]=="RISKY" else "red"
+                    safe_icon = "✅" if result["Safe To Send"] else "❌"
+                    
+                    placeholder.markdown(
+                        f"""
+                        **Progress: {i+1}/{len(emails)}**
+                        
+                        <div style='padding: 0.5rem; border-radius: 5px; margin: 0.5rem 0;'>
+                            <span style='color:{color}; font-weight: bold;'>{result['Email']}</span> 
+                            | Status: <b>{result['AI Prediction']}</b> 
+                            | Risk: <b>{result['Risk Score']}%</b> 
+                            | Safe: {safe_icon}
+                        </div>
+                        """, 
+                        unsafe_allow_html=True
+                    )
+                else:
+                    if client_id:
+                        st.error(f"❌ Stopped at email {i+1}/{len(emails)} - No credits remaining")
+                    else:
+                        st.error(f"❌ Stopped at email {i+1}/{len(emails)} - Free limit reached (600 per 24h)")
+                    break
                 
-                with col2:
-                    st.metric("Risk Score", f"{result['Risk Score']}%")
-                    st.metric("Confidence", f"{result['Confidence']}%")
-                    st.metric("Safe to Send", "✅ Yes" if result["Safe To Send"] else "❌ No")
+                progress_bar.progress((i+1)/len(emails))
                 
-                # Detailed info
-                with st.expander("📊 Comprehensive Analysis"):
-                    analysis_data = {
-                        "Email Address": result["Email"],
-                        "Final Status": result["Status"],
-                        "Risk Score": f"{result['Risk Score']}%",
-                        "AI Confidence": f"{result['Confidence']}%",
-                        "MX Records Valid": "✅ Yes" if result["MX Valid"] else "❌ No",
-                        "Disposable Domain": "⚠️ Yes" if result["Disposable"] else "✅ No",
-                        "Typo Detected": "⚠️ Yes" if result["Typo Detected"] else "✅ No",
-                        "Role-Based Email": "⚠️ Yes" if result["Role Based"] else "✅ No",
-                        "Safe to Send": "✅ Yes" if result["Safe To Send"] else "❌ No",
-                        "Validation Notes": result["Reason"]
-                    }
-                    for key, value in analysis_data.items():
-                        st.markdown(f"**{key}:** {value}")
-            else:
-                st.error("Verification limit reached")
+            except Exception as e:
+                st.error(f"⚠️ Error verifying {email}: {str(e)}")
+                continue
+        
+        # Show results
+        if results:
+            st.success(f"✅ Verified {len(results)} out of {len(emails)} emails!")
+            
+            # Summary metrics
+            st.markdown("### 📈 Summary")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            valid = len([r for r in results if r["Status"] == "VALID"])
+            risky = len([r for r in results if r["Status"] == "RISKY"])
+            invalid = len([r for r in results if r["Status"] == "INVALID"])
+            safe = len([r for r in results if r["Safe To Send"]])
+            
+            col1.metric("✅ Valid", valid, delta=f"{valid/len(results)*100:.1f}%")
+            col2.metric("⚠️ Risky", risky, delta=f"{risky/len(results)*100:.1f}%")
+            col3.metric("❌ Invalid", invalid, delta=f"{invalid/len(results)*100:.1f}%")
+            col4.metric("📧 Safe to Send", safe, delta=f"{safe/len(results)*100:.1f}%")
+            
+            # Results table
+            st.markdown("### 📋 Detailed Results")
+            result_df = pd.DataFrame(results)
+            st.dataframe(result_df, use_container_width=True)
+            
+            # Create separated download format
+            valid_emails = [r["Email"] for r in results if r["Status"] == "VALID"]
+            risky_emails = [r["Email"] for r in results if r["Status"] == "RISKY"]
+            invalid_emails = [r["Email"] for r in results if r["Status"] == "INVALID"]
+            
+            # Pad lists to same length
+            max_len = max(len(valid_emails), len(risky_emails), len(invalid_emails))
+            valid_emails += [''] * (max_len - len(valid_emails))
+            risky_emails += [''] * (max_len - len(risky_emails))
+            invalid_emails += [''] * (max_len - len(invalid_emails))
+            
+            # Create separated DataFrame
+            separated_df = pd.DataFrame({
+                'Valid Emails': valid_emails,
+                'Risky Emails': risky_emails,
+                'Invalid Emails': invalid_emails
+            })
+            
+            # Download buttons
+            st.markdown("### ⬇️ Download Results")
+            col_dl1, col_dl2 = st.columns(2)
+            
+            with col_dl1:
+                csv_full = result_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "📄 Download Full Details CSV", 
+                    csv_full, 
+                    "verified_full_details.csv", 
+                    "text/csv",
+                    key=f"full_csv_{client_id}",
+                    use_container_width=True
+                )
+            
+            with col_dl2:
+                csv_separated = separated_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "📊 Download Separated CSV (Valid/Risky/Invalid)", 
+                    csv_separated, 
+                    "verified_separated.csv", 
+                    "text/csv",
+                    key=f"separated_csv_{client_id}",
+                    use_container_width=True
+                )
+            
+            # Show updated credits if client
+            if client_id:
+                session = SessionLocal()
+                updated_client = session.query(Client).filter_by(id=client_id).first()
+                session.close()
+                if updated_client:
+                    st.success(f"💳 **Remaining Credits:** {updated_client.credits:,}")
+        else:
+            st.warning("⚠️ No emails were verified. Please check your input.")
 
 # ==========================
 # CLIENT PORTAL
@@ -1464,9 +1571,10 @@ if st.session_state.client_id:
     st.title("📧 Client Dashboard")
     st.markdown(f"**Plan:** {client.plan}  |  **Credits Remaining:** {client.credits}")
     
-    tab1, tab2 = st.tabs(["Bulk Verification", "Single Email Test"])
+    tab1, tab2 = st.tabs(["📁 CSV Upload", "✍️ Quick Verify (Paste Emails)"])
     
     with tab1:
+        st.markdown("### Upload CSV File")
         uploaded_file = st.file_uploader("Upload CSV (first column should contain emails)", type=["csv"])
         if uploaded_file:
             process_csv(uploaded_file, client_id=st.session_state.client_id)
@@ -1474,13 +1582,7 @@ if st.session_state.client_id:
             st.rerun()
     
     with tab2:
-        test_single_email(client_id=st.session_state.client_id, ip=ip)
-        # Show current credits below verification
-        session = SessionLocal()
-        updated_client = session.query(Client).filter_by(id=st.session_state.client_id).first()
-        session.close()
-        if updated_client:
-            st.info(f"💳 **Current Credits:** {updated_client.credits}")
+        test_bulk_emails(client_id=st.session_state.client_id, ip=ip)
 
 # ==========================
 # PUBLIC FREE USAGE
@@ -1489,15 +1591,16 @@ elif not st.session_state.client_id and not st.session_state.is_admin:
     st.title("🚀 AI Email Verifier Pro - Free Usage")
     st.markdown("### Free Plan: 600 emails per IP / 24h, no login required")
     
-    tab1, tab2 = st.tabs(["Bulk Verification", "Single Email Test"])
+    tab1, tab2 = st.tabs(["📁 CSV Upload", "✍️ Quick Verify (Paste Emails)"])
     
     with tab1:
+        st.markdown("### Upload CSV File")
         uploaded_file = st.file_uploader("Upload CSV (first column should contain emails)", type=["csv"])
         if uploaded_file:
             process_csv(uploaded_file, client_id=None, ip=ip)
     
     with tab2:
-        test_single_email(client_id=None, ip=ip)
+        test_bulk_emails(client_id=None, ip=ip)
 
 # ==========================
 # FOOTER
