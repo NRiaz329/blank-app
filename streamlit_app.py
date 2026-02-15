@@ -746,8 +746,49 @@ def process_csv(uploaded_file, client=None, ip=None):
         col3.metric("Invalid", invalid, delta=f"{invalid/len(results)*100:.1f}%")
         
         st.dataframe(result_df, use_container_width=True)
-        csv = result_df.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇ Download Verified CSV", csv, "verified_results.csv", "text/csv")
+        
+        # Create separated download format
+        valid_emails = [r["Email"] for r in results if r["Status"] == "VALID"]
+        risky_emails = [r["Email"] for r in results if r["Status"] == "RISKY"]
+        invalid_emails = [r["Email"] for r in results if r["Status"] == "INVALID"]
+        
+        # Pad lists to same length
+        max_len = max(len(valid_emails), len(risky_emails), len(invalid_emails))
+        valid_emails += [''] * (max_len - len(valid_emails))
+        risky_emails += [''] * (max_len - len(risky_emails))
+        invalid_emails += [''] * (max_len - len(invalid_emails))
+        
+        # Create separated DataFrame
+        separated_df = pd.DataFrame({
+            'Valid Emails': valid_emails,
+            'Risky Emails': risky_emails,
+            'Invalid Emails': invalid_emails
+        })
+        
+        # Download buttons
+        col_dl1, col_dl2 = st.columns(2)
+        
+        with col_dl1:
+            # Full detailed results
+            csv_full = result_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇ Download Full Details CSV", 
+                csv_full, 
+                "verified_full_details.csv", 
+                "text/csv",
+                key="full_csv"
+            )
+        
+        with col_dl2:
+            # Separated by status
+            csv_separated = separated_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇ Download Separated CSV (Valid/Risky/Invalid)", 
+                csv_separated, 
+                "verified_separated.csv", 
+                "text/csv",
+                key="separated_csv"
+            )
 
 # ==========================
 # SINGLE EMAIL TEST
