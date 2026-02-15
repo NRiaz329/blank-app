@@ -4,6 +4,7 @@ Admin Password: 090078601
 Plans: Free / Pro / Enterprise
 Credits + Usage Limits + CSV Download
 Free 600 emails per IP / 24h for public (no login)
+Real-time AI progress bars for uploads
 """
 
 import streamlit as st
@@ -12,6 +13,7 @@ import re
 import dns.resolver
 import random
 import hashlib
+import time
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -109,14 +111,12 @@ def ai_score(email):
     domain_len = len(email.split("@")[1])
     local_len = len(email.split("@")[0])
     risk_score = random.uniform(5, 35)
-
     if domain_len < 4:
         risk_score += 25
     if local_len < 2:
         risk_score += 20
     if any(word in email.lower() for word in ["test", "fake", "spam"]):
         risk_score += 30
-
     risk_score = min(risk_score, 100)
     confidence = 100 - risk_score
     if risk_score < 40:
@@ -283,7 +283,7 @@ if st.session_state.is_admin:
                 st.warning(f"{c.username} and all their data deleted")
 
 # ==========================
-# CLIENT PORTAL
+# CLIENT PORTAL (REAL-TIME PROGRESS)
 # ==========================
 
 elif st.session_state.client_id:
@@ -297,21 +297,29 @@ elif st.session_state.client_id:
         df = pd.read_csv(uploaded_file)
         emails = df[df.columns[0]].dropna().astype(str).tolist()
         results = []
-        for email in emails:
+        placeholder = st.empty()
+        progress_bar = st.progress(0)
+        total = len(emails)
+
+        for i, email in enumerate(emails):
             result = verify_email(email, client=client)
             if result:
                 results.append(result)
             else:
                 st.error("No credits remaining.")
                 break
+            progress_bar.progress((i+1)/total)
+            placeholder.dataframe(pd.DataFrame(results))
+            time.sleep(0.05)
+
         if results:
             result_df = pd.DataFrame(results)
-            st.dataframe(result_df)
+            placeholder.dataframe(result_df)
             csv = result_df.to_csv(index=False).encode("utf-8")
             st.download_button("⬇ Download Verified CSV", csv, "verified_results.csv", "text/csv")
 
 # ==========================
-# PUBLIC FREE USAGE (NO LOGIN)
+# PUBLIC FREE USAGE (NO LOGIN, REAL-TIME PROGRESS)
 # ==========================
 
 else:
@@ -329,15 +337,23 @@ else:
         df = pd.read_csv(uploaded_file)
         emails = df[df.columns[0]].dropna().astype(str).tolist()
         results = []
-        for email in emails:
+        placeholder = st.empty()
+        progress_bar = st.progress(0)
+        total = len(emails)
+
+        for i, email in enumerate(emails):
             result = verify_email(email, client=None, ip=ip)
             if result:
                 results.append(result)
             else:
                 st.error("Free limit of 600 emails per 24h reached for your IP")
                 break
+            progress_bar.progress((i+1)/total)
+            placeholder.dataframe(pd.DataFrame(results))
+            time.sleep(0.05)
+
         if results:
             result_df = pd.DataFrame(results)
-            st.dataframe(result_df)
+            placeholder.dataframe(result_df)
             csv = result_df.to_csv(index=False).encode("utf-8")
             st.download_button("⬇ Download Verified CSV", csv, "verified_results.csv", "text/csv")
