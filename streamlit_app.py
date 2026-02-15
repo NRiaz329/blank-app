@@ -626,7 +626,7 @@ def enhanced_ai_score(email, validation_results):
 # MAIN VERIFY EMAIL FUNCTION
 # ==========================
 
-def verify_email(email, client=None, ip=None):
+def verify_email(email, client_id=None, ip=None):
     """Enhanced email verification with comprehensive validation"""
     session = SessionLocal()
     
@@ -634,9 +634,10 @@ def verify_email(email, client=None, ip=None):
         email = email.strip().lower()
         now = datetime.utcnow()
         
-        # Refresh client from database if provided
-        if client:
-            client = session.query(Client).filter_by(id=client.id).first()
+        # Get client from database if client_id provided
+        client = None
+        if client_id:
+            client = session.query(Client).filter_by(id=client_id).first()
             if not client:
                 return None
         
@@ -1166,7 +1167,7 @@ if st.session_state.is_admin:
 # CLIENT / PUBLIC CSV PROCESSING
 # ==========================
 
-def process_csv(uploaded_file, client=None, ip=None):
+def process_csv(uploaded_file, client_id=None, ip=None):
     df = pd.read_csv(uploaded_file)
     emails = df[df.columns[0]].dropna().astype(str).tolist()
     results = []
@@ -1174,7 +1175,7 @@ def process_csv(uploaded_file, client=None, ip=None):
     progress_bar = st.progress(0)
     
     for i, email in enumerate(emails):
-        result = verify_email(email, client=client, ip=ip)
+        result = verify_email(email, client_id=client_id, ip=ip)
         if result:
             results.append(result)
             color = "green" if result["AI Prediction"]=="VALID" else "orange" if result["AI Prediction"]=="RISKY" else "red"
@@ -1186,7 +1187,7 @@ def process_csv(uploaded_file, client=None, ip=None):
                 unsafe_allow_html=True
             )
         else:
-            if client:
+            if client_id:
                 st.error("No credits remaining.")
             else:
                 st.error("Free limit reached for your IP")
@@ -1256,13 +1257,13 @@ def process_csv(uploaded_file, client=None, ip=None):
 # SINGLE EMAIL TEST
 # ==========================
 
-def test_single_email(client=None, ip=None):
+def test_single_email(client_id=None, ip=None):
     st.markdown("### 🔍 Test Single Email")
     test_email = st.text_input("Enter email to test", placeholder="example@domain.com")
     
     if st.button("Verify Email") and test_email:
         with st.spinner("Verifying..."):
-            result = verify_email(test_email, client=client, ip=ip)
+            result = verify_email(test_email, client_id=client_id, ip=ip)
             
             if result:
                 col1, col2 = st.columns([2, 1])
@@ -1317,10 +1318,18 @@ if st.session_state.client_id:
     with tab1:
         uploaded_file = st.file_uploader("Upload CSV (first column should contain emails)", type=["csv"])
         if uploaded_file:
-            process_csv(uploaded_file, client=client)
+            process_csv(uploaded_file, client_id=st.session_state.client_id)
+            # Refresh credits display after verification
+            st.rerun()
     
     with tab2:
-        test_single_email(client=client, ip=ip)
+        test_single_email(client_id=st.session_state.client_id, ip=ip)
+        # Show current credits below verification
+        session = SessionLocal()
+        updated_client = session.query(Client).filter_by(id=st.session_state.client_id).first()
+        session.close()
+        if updated_client:
+            st.info(f"💳 **Current Credits:** {updated_client.credits}")
 
 # ==========================
 # PUBLIC FREE USAGE
@@ -1334,10 +1343,10 @@ elif not st.session_state.client_id and not st.session_state.is_admin:
     with tab1:
         uploaded_file = st.file_uploader("Upload CSV (first column should contain emails)", type=["csv"])
         if uploaded_file:
-            process_csv(uploaded_file, client=None, ip=ip)
+            process_csv(uploaded_file, client_id=None, ip=ip)
     
     with tab2:
-        test_single_email(client=None, ip=ip)
+        test_single_email(client_id=None, ip=ip)
 
 # ==========================
 # FOOTER
