@@ -1,288 +1,180 @@
-import streamlit as st
+Build a complete production-ready Email Verification SaaS using ONLY free and open-source tools.
 
-# Title of the app
-st.title('My Streamlit App')
+Requirements:
 
-# Add a header
-st.header('Welcome to My Streamlit App')
+Tech Stack:
 
-# Sidebar input
-user_input = st.sidebar.text_input('Enter some text')
+Python + FastAPI (async)
 
-# Display the input
-if user_input:
-    st.write(f'You entered: {user_input}')
+PostgreSQL
 
-# Add a button
-action = st.button('Click me!')
-if action:
-    st.balloons()
-    st.success('Button clicked!')
+Redis + Celery
 
-# Add more UI components as needed
-You are a senior distributed systems engineer and SaaS architect.
+SQLAlchemy ORM
 
-Build a production-ready Email Verification SaaS using ONLY free and open-source tools.
+WebSocket support
 
-This must be architected cleanly, modular, scalable, and ready for distributed worker expansion.
+React (Vite) frontend OR modern HTML/CSS/JS
 
-DO NOT USE:
-- Paid APIs
-- Paid email verification services
-- Paid WHOIS APIs
+Docker + docker-compose
 
-Use only open-source libraries.
+Nginx reverse proxy
 
-================================================
-PROJECT OBJECTIVE
-================================================
+Ubuntu VPS compatible
 
-Build a commercial-grade Email Verification SaaS that supports:
+Core Features:
 
-- Live single email verification (real-time progress UI)
-- Bulk CSV upload verification
-- Multi-layer validation engine
-- AI-based bounce risk scoring
-- Distributed SMTP worker architecture
-- Free user rate limiting (500 per IP/day)
-- Admin panel with unlimited access
+Multi-layer Validation Engine
 
-Target accuracy: 95%+
+RFC 5322 syntax validation
 
-================================================
-TECH STACK (MANDATORY)
-================================================
+DNS A record check
 
-Backend:
-- Python
-- FastAPI
-- Async support
-- PostgreSQL
-- Redis
-- Celery
-- SQLAlchemy ORM
+MX record validation
 
-Frontend:
-- React (Vite) OR modern HTML/CSS/JS
-- WebSocket support
-- Responsive dashboard UI
+Disposable domain detection (use open-source GitHub list)
 
-Deployment:
-- Docker
-- docker-compose
-- Nginx reverse proxy
-- Ubuntu VPS compatible
+Role-based detection (admin, info, support, contact, sales, billing, help)
 
-================================================
-ARCHITECTURE
-================================================
+Deep SMTP validation using raw socket:
 
-Folder structure:
+Connect to MX
 
-email-verifier-saas/
-│
-├── docker-compose.yml
-├── Dockerfile
-├── nginx/
-│   └── nginx.conf
-├── .env.example
-│
-├── backend/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   ├── models.py
-│   │   ├── schemas.py
-│   │   ├── auth.py
-│   │   ├── rate_limit.py
-│   │   ├── websocket_manager.py
-│   │   ├── worker_heartbeat.py
-│   │   │
-│   │   ├── api/
-│   │   │   ├── verify.py
-│   │   │   ├── admin.py
-│   │   │   └── websocket.py
-│   │   │
-│   │   ├── services/
-│   │   │   ├── syntax_validator.py
-│   │   │   ├── dns_validator.py
-│   │   │   ├── disposable_checker.py
-│   │   │   ├── role_checker.py
-│   │   │   ├── smtp_validator.py
-│   │   │   ├── catchall_detector.py
-│   │   │   ├── feature_engine.py
-│   │   │   ├── risk_model.py
-│   │   │   └── heuristic_scoring.py
-│   │   │
-│   │   └── tasks/
-│   │       └── verification_tasks.py
-│   │
-│   └── requirements.txt
-│
-└── frontend/
-    ├── src/
-    │   ├── App.jsx
-    │   ├── Dashboard.jsx
-    │   ├── LiveVerify.jsx
-    │   ├── BulkUpload.jsx
-    │   ├── AdminPanel.jsx
-    │   ├── api.js
-    │   └── websocket.js
-    ├── index.html
-    ├── package.json
-    └── vite.config.js
+EHLO
 
-================================================
-VALIDATION ENGINE REQUIREMENTS
-================================================
+MAIL FROM
 
-1. Syntax validation (RFC 5322 regex)
-2. DNS A record check
-3. MX record check
-4. Disposable domain detection (GitHub list)
-5. Role-based detection
-6. Deep SMTP validation using raw socket:
-   - Connect to MX
-   - EHLO
-   - MAIL FROM
-   - RCPT TO
-   - Capture response codes
-   - Do NOT send actual message
-   - Timeout handling
-   - Retry (max 2)
-7. Catch-all detection:
-   - Test real email
-   - Test random fake email same domain
-   - If both accepted → mark CATCH_ALL
+RCPT TO
 
-================================================
-AI RISK SCORING
-================================================
+Capture SMTP response codes
 
-Use either:
+Timeout handling
 
-Option A: Heuristic weighted scoring
-OR
-Option B: scikit-learn LogisticRegression
+Max 2 retries
+
+Do NOT send actual email
+
+Catch-all detection (test real + random email same domain)
+
+AI Bounce Risk Scoring
+
+Use heuristic scoring OR scikit-learn LogisticRegression
 
 Features:
-- SMTP code
-- Response time
-- Catch-all
-- Disposable
-- Role-based
-- Greylist detected
-- Free domain vs custom
+
+SMTP code
+
+Response time
+
+Catch-all flag
+
+Disposable flag
+
+Role-based flag
+
+Free vs custom domain
 
 Output:
 {
-  email,
-  status,
-  risk_score (0–100),
-  confidence_score,
-  reason
+email,
+status (VALID, INVALID, RISKY, DISPOSABLE, CATCH_ALL),
+risk_score (0–100),
+confidence_score,
+reason
 }
 
-Model auto-trains if no model file exists.
-Weekly retraining cron setup included.
+Auto-train model if missing
 
-================================================
-LIVE VERIFICATION FEATURE
-================================================
+Weekly retraining setup
 
-Frontend:
+Live Single Email Verification
 
-Input box
-Verify button
-Animated progress steps:
-- Syntax
-- DNS
-- MX
-- SMTP
-- Risk scoring
+Input field on frontend
 
-Backend:
+Real-time progress steps:
 
-WebSocket endpoint
-Async background task
-Real-time status updates
+Syntax
 
-Completion time target:
-5–15 seconds
+DNS
 
-================================================
-RATE LIMITING
-================================================
+MX
 
-Free users:
-- 500 verifications per IP per 24h
+SMTP
 
-Admin:
-- Unlimited
-- No IP restriction
+Risk scoring
 
-================================================
-ADMIN PANEL
-================================================
+Use WebSocket for live updates
 
-Password-protected
+5–15 sec completion target
 
-Show:
-- Total verifications
-- Valid / Invalid / Risky counts
-- Worker node health
-- SMTP response logs
-- Model metrics
+Bulk Verification
 
-================================================
-DISTRIBUTED WORKER ARCHITECTURE
-================================================
+CSV upload (up to 50k emails)
 
-Main server:
-- API
-- DB
-- Redis
+Async processing with Redis + Celery
 
-Worker nodes:
-- Connect to central Redis
-- Process SMTP tasks
-- Randomize HELO
-- Random delay
-- Heartbeat to main server
-- Auto-disable if unhealthy
+Parallel workers
 
-Include:
-- Worker health table in DB
-- Heartbeat system
-- Failover logic
+Export VALID/INVALID only
 
-================================================
-SECURITY
-================================================
+Rate Limiting
 
-- API key auth
-- IP rate limiting
-- Input sanitization
-- CSV validation
-- Abuse detection logic
+500 verifications per IP per 24h (free users)
 
-================================================
-OUTPUT FORMAT
-================================================
+Admin bypass unlimited
 
-1. Print full folder tree.
-2. Then generate each file fully.
-3. Use separator:
+Admin Panel
 
-===== filename =====
+Password protected
 
-4. No placeholders.
-5. No TODO comments.
-6. No pseudo code.
-7. Must run with docker-compose up --build.
+View stats (total, valid, invalid, risky)
 
-================================================
+View SMTP logs
+
+View worker node health
+
+Block abusive IPs
+
+Distributed Worker Architecture
+
+Main API server
+
+Separate SMTP worker nodes
+
+Redis task distribution
+
+Randomize HELO
+
+Random delay
+
+Heartbeat monitoring
+
+Auto-disable unhealthy worker
+
+Security:
+
+API key authentication
+
+IP rate limiting
+
+Input sanitization
+
+CSV validation
+
+Abuse prevention logic
+
+Output Instructions:
+
+Print full folder structure first
+
+Then generate each file completely
+
+No placeholders
+
+No TODO comments
+
+No pseudo-code
+
+Must run with docker-compose up --build
 
 Generate full project now.
-
