@@ -833,22 +833,31 @@ st.markdown("---")
 # SIDEBAR: LOGIN / ADMIN
 # --------------------------
 with st.sidebar:
-    st.markdown("## 🔐 Admin Login")
-    if not st.session_state.is_admin:
-        admin_pass = st.text_input("Admin Password", type="password")
-        if admin_pass == ADMIN_PASSWORD:
-            st.session_state.is_admin = True
-            st.success("Admin Mode Enabled")
-    if st.session_state.is_admin:
-        if st.button("Logout Admin"):
-            st.session_state.is_admin = False
+    # Admin login - hidden in expander
+    with st.expander("🔒 Admin Access", expanded=False):
+        if not st.session_state.is_admin:
+            admin_pass = st.text_input("Admin Password", type="password", key="admin_pass")
+            if st.button("Login as Admin", key="admin_login_btn"):
+                if admin_pass == ADMIN_PASSWORD:
+                    st.session_state.is_admin = True
+                    st.success("Admin Mode Enabled")
+                    st.rerun()
+                else:
+                    st.error("Invalid admin password")
+        else:
+            st.success("✅ Logged in as Admin")
+            if st.button("Logout Admin", key="admin_logout_btn"):
+                st.session_state.is_admin = False
+                st.rerun()
+    
+    st.markdown("---")
     
     # Client login
     if not st.session_state.client_id:
-        st.markdown("### Client Login")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        if st.button("Login"):
+        st.markdown("### 👤 Client Login")
+        username = st.text_input("Username", key="client_username")
+        password = st.text_input("Password", type="password", key="client_password")
+        if st.button("Login", key="client_login_btn"):
             session = SessionLocal()
             client = session.query(Client).filter_by(
                 username=username,
@@ -858,12 +867,50 @@ with st.sidebar:
             if client:
                 st.session_state.client_id = client.id
                 st.success("Login Successful")
+                st.rerun()
             else:
                 st.error("Invalid Credentials")
             session.close()
     else:
-        if st.button("Logout Client"):
+        session = SessionLocal()
+        client = session.query(Client).filter_by(id=st.session_state.client_id).first()
+        if client:
+            st.markdown("### ✅ Logged In")
+            st.info(f"**User:** {client.username}\n\n**Plan:** {client.plan}\n\n**Credits:** {client.credits}")
+        session.close()
+        
+        if st.button("Logout", key="client_logout_btn"):
             st.session_state.client_id = None
+            st.rerun()
+    
+    # Contact Information
+    st.markdown("---")
+    st.markdown("### 📧 Contact Us")
+    st.markdown("""
+        <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                    padding: 1rem; 
+                    border-radius: 10px; 
+                    text-align: center;'>
+            <p style='color: white; margin: 0; font-weight: bold;'>Need Help?</p>
+            <a href='mailto:numanriaz4209@gmail.com' 
+               style='color: white; 
+                      text-decoration: none; 
+                      font-size: 0.9rem;
+                      display: block;
+                      margin-top: 0.5rem;'>
+                📩 numanriaz4209@gmail.com
+            </a>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+        <div style='margin-top: 1rem; padding: 0.5rem; text-align: center;'>
+            <small style='color: #666;'>
+                For support, upgrades, or custom plans<br>
+                Contact us anytime!
+            </small>
+        </div>
+    """, unsafe_allow_html=True)
 
 # ==========================
 # ADMIN PANEL
@@ -1173,3 +1220,27 @@ elif not st.session_state.client_id and not st.session_state.is_admin:
     
     with tab2:
         test_single_email(client=None, ip=ip)
+
+# ==========================
+# FOOTER
+# ==========================
+st.markdown("---")
+st.markdown("""
+    <div style='text-align: center; padding: 2rem 0 1rem 0;'>
+        <p style='color: #666; font-size: 0.9rem; margin-bottom: 0.5rem;'>
+            © 2026 AI Email Verifier Pro - Enterprise-Grade Email Validation
+        </p>
+        <p style='margin: 0.5rem 0;'>
+            <a href='mailto:numanriaz4209@gmail.com' 
+               style='color: #667eea; 
+                      text-decoration: none; 
+                      font-weight: bold;
+                      font-size: 1rem;'>
+                📧 Contact: numanriaz4209@gmail.com
+            </a>
+        </p>
+        <p style='color: #888; font-size: 0.8rem; margin-top: 0.5rem;'>
+            For support, custom plans, or enterprise inquiries
+        </p>
+    </div>
+""", unsafe_allow_html=True)
