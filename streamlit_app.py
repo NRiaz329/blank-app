@@ -6,8 +6,9 @@ import random
 import hashlib
 import socket
 from datetime import datetime, timedelta
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Text
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
+from sqlalchemy import inspect
 
 # ==========================
 # DATABASE
@@ -42,7 +43,7 @@ class EmailVerification(Base):
     safe_to_send = Column(Boolean)
     ai_confidence = Column(Float)
     ai_risk_score = Column(Float)
-    reason = Column(String, nullable=True)
+    reason = Column(Text, nullable=True)  # Changed to Text for longer reasons
     timestamp = Column(DateTime, default=datetime.utcnow)
 
 class PublicUsage(Base):
@@ -52,6 +53,33 @@ class PublicUsage(Base):
     count = Column(Integer, default=0)
     reset = Column(DateTime, default=datetime.utcnow)
 
+# ==========================
+# DATABASE MIGRATION
+# ==========================
+
+def migrate_database():
+    """Add missing columns to existing tables"""
+    inspector = inspect(engine)
+    
+    # Check if 'reason' column exists in emails table
+    columns = [col['name'] for col in inspector.get_columns('emails')]
+    
+    if 'reason' not in columns:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE emails ADD COLUMN reason TEXT"))
+            conn.commit()
+            print("✅ Added 'reason' column to emails table")
+
+# Import text for raw SQL
+from sqlalchemy import text
+
+# Run migration before creating tables
+try:
+    migrate_database()
+except Exception as e:
+    print(f"Migration note: {e}")
+
+# Create all tables
 Base.metadata.create_all(bind=engine)
 
 # ==========================
@@ -428,7 +456,7 @@ def enhanced_ai_score(email, validation_results):
     return risk_score, confidence, status, reasons
 
 # ==========================
-# MAIN VERIFY EMAIL FUNCTION (FIXED)
+# MAIN VERIFY EMAIL FUNCTION
 # ==========================
 
 def verify_email(email, client=None, ip=None):
@@ -511,8 +539,9 @@ def verify_email(email, client=None, ip=None):
         # Determine if safe to send
         safe_to_send = risk_score < 40 and validation_results['syntax_valid'] and validation_results['mx_valid']
         
-        # Compile reason string
+        # Compile reason string (limit to 500 chars to avoid database issues)
         reason_str = "; ".join(reasons) if reasons else "All checks passed"
+        reason_str = reason_str[:500]  # Truncate if too long
         
         # Save to database
         record = EmailVerification(
