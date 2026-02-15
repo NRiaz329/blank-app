@@ -7,7 +7,7 @@ import hashlib
 import socket
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
 
 # ==========================
 # DATABASE
@@ -15,7 +15,8 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 engine = create_engine("sqlite:///email_verifier.db", connect_args={"check_same_thread": False})
 Base = declarative_base()
-SessionLocal = sessionmaker(bind=engine)
+session_factory = sessionmaker(bind=engine)
+SessionLocal = scoped_session(session_factory)
 
 # ==========================
 # MODELS
@@ -427,122 +428,133 @@ def enhanced_ai_score(email, validation_results):
     return risk_score, confidence, status, reasons
 
 # ==========================
-# MAIN VERIFY EMAIL FUNCTION
+# MAIN VERIFY EMAIL FUNCTION (FIXED)
 # ==========================
 
-def verify_email(email, session, client=None, ip=None):
-    """Enhanced email verification with strict validation"""
-    email = email.strip().lower()
-    now = datetime.utcnow()
+def verify_email(email, client=None, ip=None):
+    """Enhanced email verification with strict validation and proper session management"""
+    # Create a new session for this verification
+    session = SessionLocal()
     
-    # PUBLIC LIMIT
-    if client is None:
-        usage = session.query(PublicUsage).filter_by(ip=ip).first()
-        if not usage:
-            usage = PublicUsage(ip=ip, count=0, reset=now + timedelta(hours=24))
-            session.add(usage)
-            session.commit()
-        elif now > usage.reset:
-            usage.count = 0
-            usage.reset = now + timedelta(hours=24)
-        if usage.count >= 600:
+    try:
+        email = email.strip().lower()
+        now = datetime.utcnow()
+        
+        # PUBLIC LIMIT
+        if client is None:
+            usage = session.query(PublicUsage).filter_by(ip=ip).first()
+            if not usage:
+                usage = PublicUsage(ip=ip, count=0, reset=now + timedelta(hours=24))
+                session.add(usage)
+                session.flush()  # Flush to get the ID
+            elif now > usage.reset:
+                usage.count = 0
+                usage.reset = now + timedelta(hours=24)
+            if usage.count >= 600:
+                return None
+        
+        # CLIENT LIMIT
+        if client and client.credits <= 0:
             return None
+        
+        # Initialize validation results
+        validation_results = {
+            'syntax_valid': False,
+            'syntax_reason': '',
+            'domain_rules_valid': False,
+            'domain_rules_reason': '',
+            'mx_valid': False,
+            'mx_reason': '',
+            'is_disposable': False,
+            'has_typo': False,
+            'suggested_domain': None,
+            'is_role_based': False
+        }
+        
+        # Step 1: Basic syntax validation
+        syntax_valid, syntax_reason = validate_basic_syntax(email)
+        validation_results['syntax_valid'] = syntax_valid
+        validation_results['syntax_reason'] = syntax_reason
+        
+        if not syntax_valid:
+            status = "INVALID"
+            risk_score = 100
+            confidence = 0
+            reasons = [syntax_reason]
+        else:
+            local, domain = email.split('@')
+            
+            # Step 2: Check for disposable domains
+            validation_results['is_disposable'] = check_disposable_domain(domain)
+            
+            # Step 3: Check for typos
+            has_typo, suggested = check_domain_typo(domain)
+            validation_results['has_typo'] = has_typo
+            validation_results['suggested_domain'] = suggested
+            
+            # Step 4: Validate domain-specific rules
+            domain_rules_valid, domain_rules_reason = validate_strict_domain_rules(local, domain)
+            validation_results['domain_rules_valid'] = domain_rules_valid
+            validation_results['domain_rules_reason'] = domain_rules_reason
+            
+            # Step 5: Validate MX records
+            mx_valid, mx_reason = validate_mx_record(domain)
+            validation_results['mx_valid'] = mx_valid
+            validation_results['mx_reason'] = mx_reason
+            
+            # Step 6: Check role-based
+            validation_results['is_role_based'] = check_role_based_email(local)
+            
+            # Step 7: AI Risk Scoring
+            risk_score, confidence, status, reasons = enhanced_ai_score(email, validation_results)
+        
+        # Determine if safe to send
+        safe_to_send = risk_score < 40 and validation_results['syntax_valid'] and validation_results['mx_valid']
+        
+        # Compile reason string
+        reason_str = "; ".join(reasons) if reasons else "All checks passed"
+        
+        # Save to database
+        record = EmailVerification(
+            client_id=client.id if client else None,
+            ip=ip if not client else None,
+            email=email,
+            status=status,
+            safe_to_send=safe_to_send,
+            ai_confidence=confidence,
+            ai_risk_score=risk_score,
+            reason=reason_str
+        )
+        session.add(record)
+        
+        # Update credits/usage
+        if client:
+            client.credits -= 1
+        else:
+            usage.count += 1
+        
+        # Commit all changes
+        session.commit()
+        
+        return {
+            "Email": email,
+            "Status": status,
+            "AI Prediction": status,
+            "Risk Score": round(risk_score, 2),
+            "Confidence": round(confidence, 2),
+            "Safe To Send": safe_to_send,
+            "Reason": reason_str,
+            "MX Valid": validation_results['mx_valid'],
+            "Disposable": validation_results['is_disposable'],
+            "Typo Detected": validation_results['has_typo']
+        }
     
-    # CLIENT LIMIT
-    if client and client.credits <= 0:
+    except Exception as e:
+        session.rollback()
+        st.error(f"Error verifying {email}: {str(e)}")
         return None
-    
-    # Initialize validation results
-    validation_results = {
-        'syntax_valid': False,
-        'syntax_reason': '',
-        'domain_rules_valid': False,
-        'domain_rules_reason': '',
-        'mx_valid': False,
-        'mx_reason': '',
-        'is_disposable': False,
-        'has_typo': False,
-        'suggested_domain': None,
-        'is_role_based': False
-    }
-    
-    # Step 1: Basic syntax validation
-    syntax_valid, syntax_reason = validate_basic_syntax(email)
-    validation_results['syntax_valid'] = syntax_valid
-    validation_results['syntax_reason'] = syntax_reason
-    
-    if not syntax_valid:
-        status = "INVALID"
-        risk_score = 100
-        confidence = 0
-        reasons = [syntax_reason]
-    else:
-        local, domain = email.split('@')
-        
-        # Step 2: Check for disposable domains
-        validation_results['is_disposable'] = check_disposable_domain(domain)
-        
-        # Step 3: Check for typos
-        has_typo, suggested = check_domain_typo(domain)
-        validation_results['has_typo'] = has_typo
-        validation_results['suggested_domain'] = suggested
-        
-        # Step 4: Validate domain-specific rules
-        domain_rules_valid, domain_rules_reason = validate_strict_domain_rules(local, domain)
-        validation_results['domain_rules_valid'] = domain_rules_valid
-        validation_results['domain_rules_reason'] = domain_rules_reason
-        
-        # Step 5: Validate MX records
-        mx_valid, mx_reason = validate_mx_record(domain)
-        validation_results['mx_valid'] = mx_valid
-        validation_results['mx_reason'] = mx_reason
-        
-        # Step 6: Check role-based
-        validation_results['is_role_based'] = check_role_based_email(local)
-        
-        # Step 7: AI Risk Scoring
-        risk_score, confidence, status, reasons = enhanced_ai_score(email, validation_results)
-    
-    # Determine if safe to send
-    safe_to_send = risk_score < 40 and validation_results['syntax_valid'] and validation_results['mx_valid']
-    
-    # Compile reason string
-    reason_str = "; ".join(reasons) if reasons else "All checks passed"
-    
-    # Save to database
-    record = EmailVerification(
-        client_id=client.id if client else None,
-        ip=ip if not client else None,
-        email=email,
-        status=status,
-        safe_to_send=safe_to_send,
-        ai_confidence=confidence,
-        ai_risk_score=risk_score,
-        reason=reason_str
-    )
-    session.add(record)
-    
-    # Update credits/usage
-    if client:
-        client.credits -= 1
-    else:
-        usage.count += 1
-    
-    # Commit the transaction
-    session.commit()
-    
-    return {
-        "Email": email,
-        "Status": status,
-        "AI Prediction": status,
-        "Risk Score": round(risk_score, 2),
-        "Confidence": round(confidence, 2),
-        "Safe To Send": safe_to_send,
-        "Reason": reason_str,
-        "MX Valid": validation_results['mx_valid'],
-        "Disposable": validation_results['is_disposable'],
-        "Typo Detected": validation_results['has_typo']
-    }
+    finally:
+        session.close()
 
 # ==========================
 # STREAMLIT UI
@@ -550,7 +562,6 @@ def verify_email(email, session, client=None, ip=None):
 
 st.set_page_config(page_title="AI Email Verifier SaaS - Enhanced", layout="wide")
 ip = get_client_ip()
-session = SessionLocal()
 
 # SHOW PLAN LIMITS
 st.markdown("## 📋 Plans & Limits")
@@ -594,6 +605,7 @@ with st.sidebar:
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         if st.button("Login"):
+            session = SessionLocal()
             client = session.query(Client).filter_by(
                 username=username,
                 password=hash_password(password),
@@ -604,6 +616,7 @@ with st.sidebar:
                 st.success("Login Successful")
             else:
                 st.error("Invalid Credentials")
+            session.close()
     else:
         if st.button("Logout Client"):
             st.session_state.client_id = None
@@ -622,6 +635,7 @@ if st.session_state.is_admin:
         new_pass = st.text_input("Password", type="password")
         new_plan = st.selectbox("Plan", ["Free", "Pro", "Enterprise"])
         if st.button("Create Client"):
+            session = SessionLocal()
             if not session.query(Client).filter_by(username=new_user).first():
                 credits = PLAN_LIMITS[new_plan]
                 client = Client(
@@ -635,13 +649,16 @@ if st.session_state.is_admin:
                 st.success(f"Client '{new_user}' Created with {credits} credits")
             else:
                 st.error("Username already exists")
+            session.close()
     
     with tab2:
         st.subheader("Verification Statistics")
+        session = SessionLocal()
         total_verifications = session.query(EmailVerification).count()
         valid_count = session.query(EmailVerification).filter_by(status="VALID").count()
         risky_count = session.query(EmailVerification).filter_by(status="RISKY").count()
         invalid_count = session.query(EmailVerification).filter_by(status="INVALID").count()
+        session.close()
         
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total Verified", total_verifications)
@@ -661,7 +678,13 @@ def process_csv(uploaded_file, client=None, ip=None):
     progress_bar = st.progress(0)
     
     for i, email in enumerate(emails):
-        result = verify_email(email, session=session, client=client, ip=ip)
+        # Refresh client data if logged in
+        if client:
+            session = SessionLocal()
+            client = session.query(Client).filter_by(id=client.id).first()
+            session.close()
+        
+        result = verify_email(email, client=client, ip=ip)
         if result:
             results.append(result)
             color = "green" if result["AI Prediction"]=="VALID" else "orange" if result["AI Prediction"]=="RISKY" else "red"
@@ -701,17 +724,19 @@ def process_csv(uploaded_file, client=None, ip=None):
 # SINGLE EMAIL TEST
 # ==========================
 
-def test_single_email():
+def test_single_email(client=None, ip=None):
     st.markdown("### 🔍 Test Single Email")
     test_email = st.text_input("Enter email to test", placeholder="example@domain.com")
     
     if st.button("Verify Email") and test_email:
         with st.spinner("Verifying..."):
-            client = None
-            if st.session_state.client_id:
-                client = session.query(Client).filter_by(id=st.session_state.client_id).first()
+            # Refresh client data if logged in
+            if client:
+                session = SessionLocal()
+                client = session.query(Client).filter_by(id=client.id).first()
+                session.close()
             
-            result = verify_email(test_email, session=session, client=client, ip=ip)
+            result = verify_email(test_email, client=client, ip=ip)
             
             if result:
                 col1, col2 = st.columns([2, 1])
@@ -751,7 +776,10 @@ def test_single_email():
 # CLIENT PORTAL
 # ==========================
 if st.session_state.client_id:
+    session = SessionLocal()
     client = session.query(Client).filter_by(id=st.session_state.client_id).first()
+    session.close()
+    
     st.title("📧 Client Dashboard")
     st.markdown(f"**Plan:** {client.plan}  |  **Credits Remaining:** {client.credits}")
     
@@ -763,7 +791,7 @@ if st.session_state.client_id:
             process_csv(uploaded_file, client=client)
     
     with tab2:
-        test_single_email()
+        test_single_email(client=client, ip=ip)
 
 # ==========================
 # PUBLIC FREE USAGE
@@ -780,4 +808,4 @@ elif not st.session_state.client_id and not st.session_state.is_admin:
             process_csv(uploaded_file, client=None, ip=ip)
     
     with tab2:
-        test_single_email()
+        test_single_email(client=None, ip=ip)
