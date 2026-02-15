@@ -3,7 +3,7 @@ AI Email Verification SaaS
 Admin Password: 090078601
 Plans: Free / Pro / Enterprise
 Credits + Usage Limits + CSV Download
-Free 600 emails per IP / 24h for public
+Free 600 emails per IP / 24h for public (no login)
 """
 
 import streamlit as st
@@ -59,7 +59,7 @@ class PublicUsage(Base):
     count = Column(Integer, default=0)
     reset = Column(DateTime, default=datetime.utcnow)
 
-# CREATE TABLES IMMEDIATELY
+# CREATE TABLES
 Base.metadata.create_all(bind=engine)
 
 # ==========================
@@ -200,7 +200,7 @@ ip = get_client_ip()
 
 with st.sidebar:
 
-    st.markdown("## 🔐 Login")
+    st.markdown("## 🔐 Admin Login")
 
     # Admin login
     if not st.session_state.is_admin:
@@ -311,19 +311,8 @@ elif st.session_state.client_id:
             csv = result_df.to_csv(index=False).encode("utf-8")
             st.download_button("⬇ Download Verified CSV", csv, "verified_results.csv", "text/csv")
 
-    st.subheader("Verification History")
-    history = db.query(EmailVerification).filter_by(client_id=client.id).all()
-    if history:
-        st.dataframe(pd.DataFrame([{
-            "Email": h.email,
-            "Status": h.status,
-            "Risk": h.ai_risk_score,
-            "Confidence": h.ai_confidence,
-            "Date": h.timestamp
-        } for h in history]))
-
 # ==========================
-# PUBLIC FREE USAGE
+# PUBLIC FREE USAGE (NO LOGIN)
 # ==========================
 
 else:
@@ -331,6 +320,7 @@ else:
     st.markdown("""
     ### Free Plan for Public
     - 600 emails per IP per 24 hours
+    - No login required
     - Drag & Drop CSV
     - AI-powered risk scoring
     - Contact us to upgrade for more credits
