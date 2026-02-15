@@ -771,150 +771,87 @@ def verify_email(email, client=None, ip=None):
 st.set_page_config(page_title="AI Email Verifier Pro - Enhanced", layout="wide", page_icon="🔐")
 ip = get_client_ip()
 
-# STUNNING MODERN LOGO HEADER
+# ULTRA-MINIMAL LOGO BAR (18px height)
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=Rajdhani:wght@600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap');
     
     .hero-section {
         position: relative;
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 25%, #7e22ce 50%, #c026d3 75%, #ec4899 100%);
-        border-radius: 20px;
-        padding: 3rem 2rem;
-        margin-bottom: 2rem;
-        overflow: hidden;
-        box-shadow: 0 10px 40px rgba(139, 92, 246, 0.4);
-        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        border-radius: 6px;
+        padding: 0.25rem 0.6rem;
+        margin-bottom: 0.5rem;
+        height: 18px;
+        display: flex;
+        align-items: center;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.25);
+        transition: all 0.2s ease;
         cursor: pointer;
     }
     
     .hero-section:hover {
-        transform: translateY(-5px) scale(1.01);
-        box-shadow: 0 15px 60px rgba(139, 92, 246, 0.6);
-    }
-    
-    .hero-section::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-        animation: rotate 20s linear infinite;
-    }
-    
-    @keyframes rotate {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
+        box-shadow: 0 3px 12px rgba(102, 126, 234, 0.35);
+        transform: translateY(-1px);
     }
     
     .logo-content {
-        position: relative;
-        z-index: 1;
-        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        gap: 0.5rem;
+    }
+    
+    .brand-section {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
     }
     
     .shield-icon {
-        font-size: 4rem;
-        margin-bottom: 1rem;
-        filter: drop-shadow(0 5px 15px rgba(255, 255, 255, 0.3));
-        animation: shield-pulse 2s ease-in-out infinite;
-    }
-    
-    @keyframes shield-pulse {
-        0%, 100% { transform: scale(1); }
-        50% { transform: scale(1.1); }
+        font-size: 0.75rem;
+        line-height: 1;
     }
     
     .brand-name {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 3.5rem;
-        font-weight: 900;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.7rem;
+        font-weight: 600;
         color: white;
         margin: 0;
-        text-shadow: 0 0 20px rgba(255, 255, 255, 0.5),
-                     0 0 40px rgba(139, 92, 246, 0.5),
-                     3px 3px 6px rgba(0, 0, 0, 0.3);
-        letter-spacing: 3px;
-        line-height: 1.2;
+        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+        letter-spacing: 0.3px;
+        line-height: 1;
     }
     
     .brand-highlight {
-        background: linear-gradient(90deg, #fbbf24, #f59e0b, #fbbf24);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        animation: shine 3s ease-in-out infinite;
+        color: #fbbf24;
     }
     
-    @keyframes shine {
-        0%, 100% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-    }
-    
-    .tagline {
-        font-family: 'Rajdhani', sans-serif;
-        font-size: 1.3rem;
-        color: rgba(255, 255, 255, 0.95);
-        margin-top: 1rem;
-        font-weight: 600;
-        letter-spacing: 2px;
-        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+    .badges-section {
+        display: flex;
+        gap: 0.3rem;
+        align-items: center;
     }
     
     .security-badge {
-        display: inline-block;
         background: rgba(255, 255, 255, 0.2);
-        backdrop-filter: blur(10px);
-        padding: 0.5rem 1.5rem;
-        border-radius: 50px;
-        margin-top: 1rem;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        transition: all 0.3s ease;
-    }
-    
-    .security-badge:hover {
-        background: rgba(255, 255, 255, 0.3);
-        border-color: rgba(255, 255, 255, 0.5);
-    }
-    
-    .security-text {
+        padding: 0.15rem 0.35rem;
+        border-radius: 8px;
+        font-size: 0.55rem;
         color: white;
-        font-size: 0.95rem;
         font-weight: 600;
-        letter-spacing: 1px;
+        white-space: nowrap;
+        line-height: 1;
     }
     
     .refresh-hint {
-        color: rgba(255, 255, 255, 0.8);
-        font-size: 0.9rem;
-        margin-top: 1.2rem;
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 0.6rem;
         font-style: italic;
-        animation: blink 2.5s ease-in-out infinite;
-    }
-    
-    @keyframes blink {
-        0%, 100% { opacity: 0.5; }
-        50% { opacity: 1; }
-    }
-    
-    .feature-icons {
-        display: flex;
-        justify-content: center;
-        gap: 2rem;
-        margin-top: 1.5rem;
-        flex-wrap: wrap;
-    }
-    
-    .feature-icon {
-        font-size: 2rem;
-        opacity: 0.9;
-        transition: transform 0.3s ease;
-    }
-    
-    .feature-icon:hover {
-        transform: scale(1.2) rotate(5deg);
+        white-space: nowrap;
+        line-height: 1;
     }
     
     .stButton button[kind="secondary"] {
@@ -922,34 +859,37 @@ st.markdown("""
         border: none !important;
         padding: 0 !important;
         width: 100% !important;
-        margin-top: -3rem !important;
+        margin-top: -0.25rem !important;
+        height: 0 !important;
+    }
+    
+    @media (max-width: 768px) {
+        .badges-section {
+            display: none;
+        }
+        .brand-name {
+            font-size: 0.65rem;
+        }
     }
     </style>
 """, unsafe_allow_html=True)
 
 # Hidden clickable button
-if st.button("refresh_page_logo", key="logo_refresh_btn", type="secondary", use_container_width=True):
+if st.button("refresh_minimal", key="logo_refresh_btn", type="secondary", use_container_width=True):
     st.rerun()
 
 st.markdown("""
     <div class="hero-section" onclick="document.querySelector('[key=\\'logo_refresh_btn\\']').click()">
         <div class="logo-content">
-            <div class="shield-icon">🛡️🔐</div>
-            <h1 class="brand-name">
-                AI EMAIL <span class="brand-highlight">VERIFIER</span> PRO
-            </h1>
-            <p class="tagline">⚡ ENTERPRISE-GRADE VALIDATION & SECURITY ⚡</p>
-            <div class="feature-icons">
-                <span class="feature-icon" title="Military-Grade Encryption">🔒</span>
-                <span class="feature-icon" title="Real-Time Verification">⚡</span>
-                <span class="feature-icon" title="99.9% Accuracy">✓</span>
-                <span class="feature-icon" title="Cloud Secure">☁️</span>
-                <span class="feature-icon" title="AI-Powered">🤖</span>
+            <div class="brand-section">
+                <span class="shield-icon">🛡</span>
+                <span class="brand-name">AI EMAIL <span class="brand-highlight">VERIFIER</span> PRO</span>
             </div>
-            <div class="security-badge">
-                <span class="security-text">🔐 256-BIT ENCRYPTED • GDPR COMPLIANT</span>
+            <div class="badges-section">
+                <span class="security-badge">🔐 SECURE</span>
+                <span class="security-badge">✓ GDPR</span>
+                <span class="refresh-hint">↻ refresh</span>
             </div>
-            <p class="refresh-hint">↻ Click anywhere to refresh ↻</p>
         </div>
     </div>
 """, unsafe_allow_html=True)
