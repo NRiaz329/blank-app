@@ -769,7 +769,6 @@ st.markdown("""
     .main-header {
         text-align: center;
         padding: 1rem 0;
-        cursor: pointer;
         transition: transform 0.2s;
     }
     .main-header:hover {
@@ -789,12 +788,20 @@ st.markdown("""
         margin-top: -0.5rem;
     }
     </style>
-    <div class="main-header" onclick="window.location.reload()">
+    <div class="main-header">
         <div class="logo-text">🔍 AI Email Verifier Pro</div>
-        <div class="tagline">Enterprise-Grade Email Validation | Click to Refresh</div>
+        <div class="tagline">Enterprise-Grade Email Validation</div>
     </div>
     <hr>
 """, unsafe_allow_html=True)
+
+# Add refresh button
+col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 1, 1])
+with col_refresh2:
+    if st.button("🔄 Refresh Page", use_container_width=True):
+        st.rerun()
+
+st.markdown("---")
 
 # SHOW PLAN LIMITS
 st.markdown("## 📋 Plans & Limits")
