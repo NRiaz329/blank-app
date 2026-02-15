@@ -1,13 +1,3 @@
-"""
-AI Email Verification SaaS
-Admin Password: 090078601
-Plans: Free / Pro / Enterprise
-Credits + Usage Limits + CSV Download
-Free 600 emails per IP / 24h for public (no login)
-Live AI risk prediction messages per email (color-coded)
-Dynamic risk % progress bar per row
-"""
-
 import streamlit as st
 import pandas as pd
 import re
@@ -55,7 +45,7 @@ class EmailVerification(Base):
 class PublicUsage(Base):
     __tablename__ = "public_usage"
     id = Column(Integer, primary_key=True)
-    ip = Column(String)
+    ip = Column(String, unique=True)
     count = Column(Integer, default=0)
     reset = Column(DateTime, default=datetime.utcnow)
 
@@ -125,19 +115,22 @@ def ai_score(email):
         status = "INVALID"
     return risk_score, confidence, status
 
+# ==========================
+# VERIFY EMAIL (safe)
+# ==========================
+
 def verify_email(email, session, client=None, ip=None):
-    """Verify email safely with SQLAlchemy session"""
     email = email.strip()
+    now = datetime.utcnow()
 
     # PUBLIC LIMIT
     if client is None:
         usage = session.query(PublicUsage).filter_by(ip=ip).first()
-        now = datetime.utcnow()
         if not usage:
             usage = PublicUsage(ip=ip, count=0, reset=now + timedelta(hours=24))
             session.add(usage)
-            session.commit()
-        if now > usage.reset:
+            session.commit()  # commit new usage record
+        elif now > usage.reset:
             usage.count = 0
             usage.reset = now + timedelta(hours=24)
         if usage.count >= 600:
@@ -160,26 +153,23 @@ def verify_email(email, session, client=None, ip=None):
     risk_score, confidence, ai_status = ai_score(email)
     safe_to_send = risk_score < 50
 
-    record = EmailVerification(
-        client_id=client.id if client else None,
-        ip=ip if not client else None,
-        email=email,
-        status=status,
-        safe_to_send=safe_to_send,
-        ai_confidence=confidence,
-        ai_risk_score=risk_score
-    )
+    # Safe DB transaction using session.begin()
+    with session.begin():
+        record = EmailVerification(
+            client_id=client.id if client else None,
+            ip=ip if not client else None,
+            email=email,
+            status=status,
+            safe_to_send=safe_to_send,
+            ai_confidence=confidence,
+            ai_risk_score=risk_score
+        )
+        session.add(record)
 
-    session.add(record)
-
-    # Update usage / credits
-    if client:
-        client.credits -= 1
-    else:
-        usage.count += 1
-
-    # Commit safely once per email
-    session.commit()
+        if client:
+            client.credits -= 1
+        else:
+            usage.count += 1
 
     return {
         "Email": email,
@@ -198,10 +188,7 @@ st.set_page_config(page_title="AI Email Verifier SaaS", layout="wide")
 ip = get_client_ip()
 session = SessionLocal()
 
-# ==========================
 # SHOW PLAN LIMITS
-# ==========================
-
 st.markdown("## 📋 Plans & Limits")
 st.markdown("""
 | Plan        | Daily Email Limit |
@@ -212,6 +199,9 @@ st.markdown("""
 """)
 st.markdown("---")
 
+# --------------------------
+# SIDEBAR: LOGIN / ADMIN
+# --------------------------
 with st.sidebar:
     st.markdown("## 🔐 Admin Login")
     if not st.session_state.is_admin:
@@ -246,7 +236,6 @@ with st.sidebar:
 # ==========================
 # ADMIN PANEL
 # ==========================
-
 if st.session_state.is_admin:
     st.title("🛡 Admin Dashboard")
     st.subheader("Create Client")
@@ -254,101 +243,66 @@ if st.session_state.is_admin:
     new_pass = st.text_input("Password", type="password")
     new_plan = st.selectbox("Plan", ["Free", "Pro", "Enterprise"])
     if st.button("Create Client"):
-        try:
-            if not session.query(Client).filter_by(username=new_user).first():
-                credits = PLAN_LIMITS[new_plan]
-                client = Client(
-                    username=new_user,
-                    password=hash_password(new_pass),
-                    plan=new_plan,
-                    credits=credits
-                )
-                session.add(client)
-                session.commit()
-                st.success(f"Client '{new_user}' Created")
-        except Exception as e:
-            st.error(f"Error creating client: {e}")
+        if not session.query(Client).filter_by(username=new_user).first():
+            credits = PLAN_LIMITS[new_plan]
+            client = Client(
+                username=new_user,
+                password=hash_password(new_pass),
+                plan=new_plan,
+                credits=credits
+            )
+            session.add(client)
+            session.commit()
+            st.success(f"Client '{new_user}' Created")
 
-    st.subheader("Manage Clients")
-    clients = session.query(Client).all()
-    for c in clients:
-        st.write(f"User: {c.username} | Plan: {c.plan} | Credits: {c.credits} | Active: {c.is_active}")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button(f"Add 1000 Credits to {c.username}", key=f"add_{c.id}"):
-                c.credits += 1000
-                session.commit()
-        with col2:
-            if st.button(f"Deactivate {c.username}", key=f"deactivate_{c.id}"):
-                c.is_active = False
-                session.commit()
-        with col3:
-            if st.button(f"Delete {c.username}", key=f"delete_{c.id}"):
-                session.query(EmailVerification).filter_by(client_id=c.id).delete()
-                session.delete(c)
-                session.commit()
+# ==========================
+# CLIENT / PUBLIC CSV PROCESSING
+# ==========================
+
+def process_csv(uploaded_file, client=None, ip=None):
+    df = pd.read_csv(uploaded_file)
+    emails = df[df.columns[0]].dropna().astype(str).tolist()
+    results = []
+    placeholder = st.empty()
+    progress_bar = st.progress(0)
+
+    for i, email in enumerate(emails):
+        result = verify_email(email, session=session, client=client, ip=ip)
+        if result:
+            results.append(result)
+            color = "green" if result["AI Prediction"]=="VALID" else "orange" if result["AI Prediction"]=="RISKY" else "red"
+            placeholder.markdown(f"{i+1}/{len(emails)} → <span style='color:{color}'>{result['Email']} | {result['AI Prediction']} | Risk: {result['Risk Score']}%</span>", unsafe_allow_html=True)
+        else:
+            if client:
+                st.error("No credits remaining.")
+            else:
+                st.error("Free limit reached for your IP")
+            break
+        progress_bar.progress((i+1)/len(emails))
+
+    if results:
+        result_df = pd.DataFrame(results)
+        st.dataframe(result_df)
+        csv = result_df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇ Download Verified CSV", csv, "verified_results.csv", "text/csv")
 
 # ==========================
 # CLIENT PORTAL
 # ==========================
-
-elif st.session_state.client_id:
+if st.session_state.client_id:
     client = session.query(Client).filter_by(id=st.session_state.client_id).first()
     st.title("📧 Client Dashboard")
     st.markdown(f"**Plan:** {client.plan}  |  **Credits Remaining:** {client.credits}")
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
     if uploaded_file:
-        df = pd.read_csv(uploaded_file)
-        emails = df[df.columns[0]].dropna().astype(str).tolist()
-        results = []
-        placeholder = st.empty()
-        progress_bar = st.progress(0)
-
-        for i, email in enumerate(emails):
-            result = verify_email(email, session=session, client=client)
-            if result:
-                results.append(result)
-                color = "green" if result["AI Prediction"]=="VALID" else "orange" if result["AI Prediction"]=="RISKY" else "red"
-                placeholder.markdown(f"{i+1}/{len(emails)} → <span style='color:{color}'>{result['Email']} | {result['AI Prediction']} | Risk: {result['Risk Score']}%</span>", unsafe_allow_html=True)
-            else:
-                st.error("No credits remaining.")
-                break
-            progress_bar.progress((i+1)/len(emails))
-
-        if results:
-            result_df = pd.DataFrame(results)
-            st.dataframe(result_df)
-            csv = result_df.to_csv(index=False).encode("utf-8")
-            st.download_button("⬇ Download Verified CSV", csv, "verified_results.csv", "text/csv")
+        process_csv(uploaded_file, client=client)
 
 # ==========================
 # PUBLIC FREE USAGE
 # ==========================
-
-else:
+elif not st.session_state.client_id and not st.session_state.is_admin:
     st.title("🚀 AI Email Verification SaaS - Free Usage")
     st.markdown("### Free Plan: 600 emails per IP / 24h, no login")
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
     if uploaded_file:
-        df = pd.read_csv(uploaded_file)
-        emails = df[df.columns[0]].dropna().astype(str).tolist()
-        results = []
-        placeholder = st.empty()
-        progress_bar = st.progress(0)
-
-        for i, email in enumerate(emails):
-            result = verify_email(email, session=session, client=None, ip=ip)
-            if result:
-                results.append(result)
-                color = "green" if result["AI Prediction"]=="VALID" else "orange" if result["AI Prediction"]=="RISKY" else "red"
-                placeholder.markdown(f"{i+1}/{len(emails)} → <span style='color:{color}'>{result['Email']} | {result['AI Prediction']} | Risk: {result['Risk Score']}%</span>", unsafe_allow_html=True)
-            else:
-                st.error("Free limit of 600 emails per 24h reached for your IP")
-                break
-            progress_bar.progress((i+1)/len(emails))
-
-        if results:
-            result_df = pd.DataFrame(results)
-            st.dataframe(result_df)
-            csv = result_df.to_csv(index=False).encode("utf-8")
-            st.download_button("⬇ Download Verified CSV", csv, "verified_results.csv", "text/csv")
+        process_csv(uploaded_file, client=None, ip=ip)
