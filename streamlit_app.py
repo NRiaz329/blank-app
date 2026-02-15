@@ -1,47 +1,65 @@
 import streamlit as st
-import re
-import smtplib
-import dns.resolver
 import pandas as pd
+import json
 
-def is_valid_email_format(email):
-    regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
-    return re.match(regex, email) is not None
+# Define the function to handle data export based on the selected format
 
-def smtp_verify(email):
-    domain = email.split('@')[1]
-    try:
-        mx_records = dns.resolver.resolve(domain, 'MX')
-        mx_record = str(mx_records[0].exchange)
-        with smtplib.SMTP() as smtp:
-            smtp.set_debuglevel(0)
-            smtp.connect(mx_record)
-            smtp.helo()
-            smtp.mail('test@example.com')
-            code, message = smtp.rcpt(email)
-            return code == 250
-    except Exception:
-        return False
+def export_data(data, export_type):
+    if export_type == 'CSV':
+        return data.to_csv(index=False)
+    elif export_type == 'TXT':
+        return data.to_string(index=False)
+    elif export_type == 'JSON':
+        return data.to_json(orient='records')
+    elif export_type == 'Excel':
+        return data.to_excel(index=False)
 
-def is_disposable_email(email):
-    disposable_domains = {'mailinator.com', '10minutemail.com', 'temp-mail.org'}  # Example disposable domains
-    domain = email.split('@')[1]
-    return domain in disposable_domains
+# Streamlit application with tabs for different functionalities
+st.title('Enhanced Streamlit App')
 
-def process_bulk_csv(file):
-    df = pd.read_csv(file)
-    for index, row in df.iterrows():
-        email = row['email']
-        if not is_valid_email_format(email):
-            st.write(f"Invalid email format: {email}")
-        elif not smtp_verify(email):
-            st.write(f"SMTP verification failed for: {email}")
-        elif is_disposable_email(email):
-            st.write(f"Disposable email detected: {email}")
+# Tabs for UI navigation
+tabs = st.tabs(['Single Verification', 'Bulk Upload', 'Paste Input', 'Results Export'])
+
+# Single Verification Tab
+with tabs[0]:
+    st.subheader('Single Verification')
+    input_value = st.text_input('Enter value to verify')
+    if st.button('Verify'):
+        if input_value:
+            st.success(f'Value verified: {input_value}')
         else:
-            st.write(f"Email verified: {email}")
+            st.error('Please enter a value.')
 
-st.title('Email Verification App')
-uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
-if uploaded_file is not None:
-    process_bulk_csv(uploaded_file)
+# Bulk Upload Tab
+with tabs[1]:
+    st.subheader('Bulk Upload')
+    uploaded_file = st.file_uploader('Choose a file', type='csv')
+    if uploaded_file is not None:
+        data = pd.read_csv(uploaded_file)
+        st.write(data)
+        if st.button('Process Data'):
+            st.success('Data processed successfully!')
+
+# Paste Input Tab
+with tabs[2]:
+    st.subheader('Paste Input')
+    text_area_input = st.text_area('Paste your inputs here')
+    if st.button('Submit'):  
+        # Process inputs from the text area
+        inputs = text_area_input.split('\n')
+        st.success('Inputs received!')
+
+# Results Export Tab
+with tabs[3]:
+    st.subheader('Results Export')
+    if 'data' in locals():  # Check if there is data available for export
+        export_type = st.selectbox('Select export format', ['CSV', 'TXT', 'JSON', 'Excel'])
+        if st.button('Export Data'):
+            exported_data = export_data(data, export_type)
+            st.download_button(
+                label='Download Data',
+                data=exported_data,
+                file_name=f'data_export.{export_type.lower()}',
+                mime='application/octet-stream'
+            )
+
