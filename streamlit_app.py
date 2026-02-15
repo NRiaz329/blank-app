@@ -116,7 +116,7 @@ def ai_score(email):
     return risk_score, confidence, status
 
 # ==========================
-# VERIFY EMAIL (safe)
+# VERIFY EMAIL (FIXED)
 # ==========================
 
 def verify_email(email, session, client=None, ip=None):
@@ -153,23 +153,26 @@ def verify_email(email, session, client=None, ip=None):
     risk_score, confidence, ai_status = ai_score(email)
     safe_to_send = risk_score < 50
 
-    # Safe DB transaction using session.begin()
-    with session.begin():
-        record = EmailVerification(
-            client_id=client.id if client else None,
-            ip=ip if not client else None,
-            email=email,
-            status=status,
-            safe_to_send=safe_to_send,
-            ai_confidence=confidence,
-            ai_risk_score=risk_score
-        )
-        session.add(record)
+    # Create and add the email verification record
+    record = EmailVerification(
+        client_id=client.id if client else None,
+        ip=ip if not client else None,
+        email=email,
+        status=status,
+        safe_to_send=safe_to_send,
+        ai_confidence=confidence,
+        ai_risk_score=risk_score
+    )
+    session.add(record)
 
-        if client:
-            client.credits -= 1
-        else:
-            usage.count += 1
+    # Update credits/usage
+    if client:
+        client.credits -= 1
+    else:
+        usage.count += 1
+    
+    # Commit the transaction
+    session.commit()
 
     return {
         "Email": email,
