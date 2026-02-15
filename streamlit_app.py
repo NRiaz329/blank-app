@@ -626,6 +626,12 @@ def verify_email(email, client=None, ip=None):
         email = email.strip().lower()
         now = datetime.utcnow()
         
+        # Refresh client from database if provided
+        if client:
+            client = session.query(Client).filter_by(id=client.id).first()
+            if not client:
+                return None
+        
         # PUBLIC LIMIT
         if client is None:
             usage = session.query(PublicUsage).filter_by(ip=ip).first()
@@ -757,6 +763,39 @@ def verify_email(email, client=None, ip=None):
 st.set_page_config(page_title="AI Email Verifier Pro - Enhanced", layout="wide")
 ip = get_client_ip()
 
+# CLICKABLE HEADER/LOGO
+st.markdown("""
+    <style>
+    .main-header {
+        text-align: center;
+        padding: 1rem 0;
+        cursor: pointer;
+        transition: transform 0.2s;
+    }
+    .main-header:hover {
+        transform: scale(1.02);
+    }
+    .logo-text {
+        font-size: 2.5rem;
+        font-weight: bold;
+        background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    .tagline {
+        color: #666;
+        font-size: 0.9rem;
+        margin-top: -0.5rem;
+    }
+    </style>
+    <div class="main-header" onclick="window.location.reload()">
+        <div class="logo-text">🔍 AI Email Verifier Pro</div>
+        <div class="tagline">Enterprise-Grade Email Validation | Click to Refresh</div>
+    </div>
+    <hr>
+""", unsafe_allow_html=True)
+
 # SHOW PLAN LIMITS
 st.markdown("## 📋 Plans & Limits")
 st.markdown("""
@@ -825,7 +864,7 @@ with st.sidebar:
 if st.session_state.is_admin:
     st.title("🛡 Admin Dashboard")
     
-    tab1, tab2 = st.tabs(["Create Client", "View Statistics"])
+    tab1, tab2, tab3 = st.tabs(["Create Client", "Manage Clients", "View Statistics"])
     
     with tab1:
         st.subheader("Create Client")
@@ -850,6 +889,91 @@ if st.session_state.is_admin:
             session.close()
     
     with tab2:
+        st.subheader("Manage Clients")
+        session = SessionLocal()
+        clients = session.query(Client).all()
+        
+        if clients:
+            # Display clients in a table
+            client_data = []
+            for client in clients:
+                client_data.append({
+                    "ID": client.id,
+                    "Username": client.username,
+                    "Plan": client.plan,
+                    "Credits": client.credits,
+                    "Active": "✅" if client.is_active else "❌",
+                    "Created": client.created_at.strftime("%Y-%m-%d")
+                })
+            
+            df_clients = pd.DataFrame(client_data)
+            st.dataframe(df_clients, use_container_width=True)
+            
+            st.markdown("---")
+            st.subheader("Client Actions")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Deactivate/Activate Client**")
+                client_to_toggle = st.selectbox(
+                    "Select Client", 
+                    [f"{c.username} (ID: {c.id})" for c in clients],
+                    key="toggle_client"
+                )
+                if st.button("Toggle Active Status"):
+                    client_id = int(client_to_toggle.split("ID: ")[1].rstrip(")"))
+                    client = session.query(Client).filter_by(id=client_id).first()
+                    if client:
+                        client.is_active = not client.is_active
+                        session.commit()
+                        status = "activated" if client.is_active else "deactivated"
+                        st.success(f"Client '{client.username}' has been {status}")
+                        st.rerun()
+            
+            with col2:
+                st.markdown("**Delete Client**")
+                client_to_delete = st.selectbox(
+                    "Select Client", 
+                    [f"{c.username} (ID: {c.id})" for c in clients],
+                    key="delete_client"
+                )
+                confirm_delete = st.checkbox("I confirm deletion", key="confirm_delete")
+                if st.button("Delete Client", type="secondary"):
+                    if confirm_delete:
+                        client_id = int(client_to_delete.split("ID: ")[1].rstrip(")"))
+                        client = session.query(Client).filter_by(id=client_id).first()
+                        if client:
+                            username = client.username
+                            session.delete(client)
+                            session.commit()
+                            st.success(f"Client '{username}' has been deleted")
+                            st.rerun()
+                    else:
+                        st.error("Please confirm deletion by checking the box")
+            
+            st.markdown("---")
+            st.subheader("Add Credits to Client")
+            client_to_credit = st.selectbox(
+                "Select Client", 
+                [f"{c.username} (ID: {c.id})" for c in clients],
+                key="credit_client"
+            )
+            credits_to_add = st.number_input("Credits to Add", min_value=1, max_value=100000, value=100)
+            if st.button("Add Credits"):
+                client_id = int(client_to_credit.split("ID: ")[1].rstrip(")"))
+                client = session.query(Client).filter_by(id=client_id).first()
+                if client:
+                    client.credits += credits_to_add
+                    session.commit()
+                    st.success(f"Added {credits_to_add} credits to '{client.username}'. New balance: {client.credits}")
+                    st.rerun()
+        else:
+            st.info("No clients found. Create one in the 'Create Client' tab.")
+        
+        session.close()
+    
+    with tab3:
         st.subheader("Verification Statistics")
         session = SessionLocal()
         total_verifications = session.query(EmailVerification).count()
@@ -878,12 +1002,6 @@ def process_csv(uploaded_file, client=None, ip=None):
     progress_bar = st.progress(0)
     
     for i, email in enumerate(emails):
-        # Refresh client data if logged in
-        if client:
-            session = SessionLocal()
-            client = session.query(Client).filter_by(id=client.id).first()
-            session.close()
-        
         result = verify_email(email, client=client, ip=ip)
         if result:
             results.append(result)
@@ -972,11 +1090,6 @@ def test_single_email(client=None, ip=None):
     
     if st.button("Verify Email") and test_email:
         with st.spinner("Verifying..."):
-            if client:
-                session = SessionLocal()
-                client = session.query(Client).filter_by(id=client.id).first()
-                session.close()
-            
             result = verify_email(test_email, client=client, ip=ip)
             
             if result:
