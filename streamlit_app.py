@@ -23,12 +23,17 @@ if uploaded_file is not None:
             .tolist()
         )
 
-        if not email_list:
-            st.warning("No valid email values found in the file.")
-            st.stop()
+        possible_columns = ["email", "emails", "e-mail"]
 
-        st.success(f"Loaded {len(email_list)} emails successfully.")
+email_column = None
+for col in df.columns:
+    if col in possible_columns:
+        email_column = col
+        break
 
-    except Exception as e:
-        st.error("Error reading CSV file.")
-        st.exception(e)
+if email_column is None:
+    st.error("No email column detected in CSV.")
+    st.stop()
+
+email_list = df[email_column].dropna().astype(str).str.strip().tolist()
+
