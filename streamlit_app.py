@@ -1,38 +1,47 @@
 import streamlit as st
+import re
+import smtplib
+import dns.resolver
+import pandas as pd
 
-# Title of the application
-st.title('Email Verifier Pro')
+def is_valid_email_format(email):
+    regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+    return re.match(regex, email) is not None
 
-# Create tabs
-tabs = st.tabs(['Single Verification', 'Bulk Verification', 'Statistics', 'Settings'])
+def smtp_verify(email):
+    domain = email.split('@')[1]
+    try:
+        mx_records = dns.resolver.resolve(domain, 'MX')
+        mx_record = str(mx_records[0].exchange)
+        with smtplib.SMTP() as smtp:
+            smtp.set_debuglevel(0)
+            smtp.connect(mx_record)
+            smtp.helo()
+            smtp.mail('test@example.com')
+            code, message = smtp.rcpt(email)
+            return code == 250
+    except Exception:
+        return False
 
-# Single Verification Tab
-with tabs[0]:
-    st.header('Single Email Verification')
-    email = st.text_input('Enter email address')
-    if st.button('Verify'):
-        # Logic for verifying the email (placeholder)
-        st.write(f'Verifying: {email}')
-        
-# Bulk Verification Tab
-with tabs[1]:
-    st.header('Bulk Email Verification')
-    uploaded_file = st.file_uploader('Upload CSV file', type='csv')
-    if uploaded_file is not None:
-        # Logic for verifying bulk emails (placeholder)
-        st.write('Processing file...')
-        
-# Statistics Tab
-with tabs[2]:
-    st.header('Statistics')
-    # Display statistics (placeholder)
-    st.write('Statistics will be displayed here')
+def is_disposable_email(email):
+    disposable_domains = {'mailinator.com', '10minutemail.com', 'temp-mail.org'}  # Example disposable domains
+    domain = email.split('@')[1]
+    return domain in disposable_domains
 
-# Settings Tab
-with tabs[3]:
-    st.header('Settings')
-    # Settings options (placeholder)
-    st.write('Configure your settings here')
+def process_bulk_csv(file):
+    df = pd.read_csv(file)
+    for index, row in df.iterrows():
+        email = row['email']
+        if not is_valid_email_format(email):
+            st.write(f"Invalid email format: {email}")
+        elif not smtp_verify(email):
+            st.write(f"SMTP verification failed for: {email}")
+        elif is_disposable_email(email):
+            st.write(f"Disposable email detected: {email}")
+        else:
+            st.write(f"Email verified: {email}")
 
-if __name__ == '__main__':
-    st.run()
+st.title('Email Verification App')
+uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+if uploaded_file is not None:
+    process_bulk_csv(uploaded_file)
