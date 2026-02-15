@@ -1,51 +1,52 @@
-streamlit
-pandas
-dnspython
-sqlalchemy
 """
 AI Email Verification SaaS
 Admin Password: 090078601
 Free: 600 emails/IP/24h
-Streamlit Cloud Compatible Version
+AI Scoring with Risk Prediction + Real-Time Progress
 """
 
 import streamlit as st
 import pandas as pd
 import re
+import socket
 import dns.resolver
-import random
-import time
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
+import time
 
 # ==========================
-# DATABASE (SQLite for Cloud)
+# DATABASE CONFIG
 # ==========================
 
-engine = create_engine("sqlite:///email_verifier.db")
+DB_URL = "postgresql://postgres:password@localhost:5432/email_verifier"
+engine = create_engine(DB_URL)
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
 db = SessionLocal()
 
 # ==========================
-# MODELS
+# DB MODELS
 # ==========================
 
 class EmailVerification(Base):
     __tablename__ = "emails"
-    id = Column(Integer, primary_key=True)
-    email = Column(String)
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, index=True)
     status = Column(String)
     safe_to_send = Column(Boolean)
     ai_confidence = Column(Float)
     ai_risk_score = Column(Float)
+    ai_pred_status = Column(String)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
 class Usage(Base):
     __tablename__ = "usage"
-    id = Column(Integer, primary_key=True)
-    ip = Column(String)
+    id = Column(Integer, primary_key=True, index=True)
+    ip = Column(String, index=True)
     count = Column(Integer, default=0)
     reset = Column(DateTime)
 
@@ -57,6 +58,7 @@ Base.metadata.create_all(bind=engine)
 
 ADMIN_PASSWORD = "090078601"
 FREE_LIMIT = 600
+MAX_FILE_SIZE_MB = 200
 
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
@@ -66,7 +68,10 @@ if "is_admin" not in st.session_state:
 # ==========================
 
 def get_client_ip():
-    return "cloud_user"  # Streamlit Cloud safe
+    try:
+        return st.runtime.scriptrunner.get_script_run_ctx().request.remote_addr
+    except:
+        return "local_user"
 
 def check_rate_limit(ip, amount):
     if st.session_state.is_admin:
@@ -93,7 +98,7 @@ def check_rate_limit(ip, amount):
     return True
 
 # ==========================
-# EMAIL VALIDATION
+# EMAIL VERIFICATION
 # ==========================
 
 def validate_syntax(email):
@@ -102,41 +107,63 @@ def validate_syntax(email):
 
 def validate_mx(domain):
     try:
-        dns.resolver.resolve(domain, 'MX')
-        return True
+        return dns.resolver.resolve(domain, 'MX')
     except:
-        return False
+        return None
+
+def smtp_probe(email):
+    try:
+        domain = email.split("@")[1]
+        records = dns.resolver.resolve(domain, 'MX')
+        mx_record = str(records[0].exchange)
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.settimeout(8)
+        server.connect((mx_record, 25))
+        server.recv(1024)
+        server.send(b"EHLO example.com\r\n")
+        server.recv(1024)
+        server.send(b"MAIL FROM:<check@example.com>\r\n")
+        server.recv(1024)
+        server.send(f"RCPT TO:<{email}>\r\n".encode())
+        response = server.recv(1024).decode()
+        server.close()
+        return response
+    except:
+        return None
 
 # ==========================
-# LIGHTWEIGHT AI SCORING
+# AI SCORING
 # ==========================
 
-def ai_score(email):
+def train_ai_model():
+    df = pd.read_sql(db.query(EmailVerification).statement, db.bind)
+    if df.empty:
+        return None, None
+    df['domain_len'] = df['email'].apply(lambda x: len(x.split('@')[1]))
+    df['local_len'] = df['email'].apply(lambda x: len(x.split('@')[0]))
+    df['status_encoded'] = LabelEncoder().fit_transform(df['status'])
+    X = df[['domain_len', 'local_len']]
+    y = df['status_encoded']
+    model = RandomForestClassifier(n_estimators=50, random_state=42)
+    model.fit(X, y)
+    label_map = dict(zip(df['status_encoded'], df['status']))
+    return model, label_map
+
+def ai_predict(email, model, label_map):
+    if model is None:
+        return 50.0, 0.5, "RISKY"
     domain_len = len(email.split("@")[1])
     local_len = len(email.split("@")[0])
+    X = [[domain_len, local_len]]
+    pred_encoded = model.predict(X)[0]
+    pred_proba = max(model.predict_proba(X)[0])
+    pred_status = label_map.get(pred_encoded, "RISKY")
+    risk_score = 100 - (pred_proba*100)
+    confidence = pred_proba*100
+    return risk_score, confidence, pred_status
 
-    risk_score = random.uniform(10, 40)
-
-    if domain_len < 4 or local_len < 2:
-        risk_score += 30
-    if any(x in email for x in ["test", "fake", "spam"]):
-        risk_score += 25
-
-    risk_score = min(risk_score, 100)
-    confidence = 100 - risk_score
-
-    if risk_score < 40:
-        status = "VALID"
-    elif risk_score < 70:
-        status = "RISKY"
-    else:
-        status = "INVALID"
-
-    return risk_score, confidence, status
-
-def verify_email(email):
+def verify_email(email, model=None, label_map=None):
     email = email.strip()
-
     if not validate_syntax(email):
         status = "INVALID"
     else:
@@ -144,9 +171,17 @@ def verify_email(email):
         if not validate_mx(domain):
             status = "INVALID"
         else:
-            status = "VALID"
+            response = smtp_probe(email)
+            if response is None:
+                status = "RISKY"
+            elif "550" in response:
+                status = "INVALID"
+            elif "250" in response:
+                status = "VALID"
+            else:
+                status = "RISKY"
 
-    risk_score, confidence, ai_status = ai_score(email)
+    risk_score, confidence, ai_status = ai_predict(email, model, label_map)
     safe_to_send = risk_score < 50
 
     record = EmailVerification(
@@ -154,7 +189,8 @@ def verify_email(email):
         status=status,
         safe_to_send=safe_to_send,
         ai_confidence=confidence,
-        ai_risk_score=risk_score
+        ai_risk_score=risk_score,
+        ai_pred_status=ai_status
     )
     db.add(record)
     db.commit()
@@ -163,8 +199,8 @@ def verify_email(email):
         "email": email,
         "status": status,
         "safe_to_send": safe_to_send,
-        "ai_confidence": round(confidence, 2),
-        "ai_risk_score": round(risk_score, 2),
+        "ai_confidence": round(confidence,2),
+        "ai_risk_score": round(risk_score,2),
         "ai_pred_status": ai_status
     }
 
@@ -187,63 +223,61 @@ with st.sidebar:
         if st.button("Logout"):
             st.session_state.is_admin = False
 
+# Train AI
+model, label_map = train_ai_model()
+
 # ==========================
 # ADMIN PAGE
 # ==========================
-
 if st.session_state.is_admin:
-    st.title("🛡 Admin Bulk Verification + AI Scoring")
-
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    st.title("🛡 Admin Bulk Verification + Real-Time AI Scoring")
+    uploaded_file = st.file_uploader("Upload CSV (Any Size)", type=["csv"])
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
-        emails = df[df.columns[0]].dropna().astype(str).tolist()
-
+        email_column = df.columns[0]
+        emails = df[email_column].dropna().astype(str).tolist()
+        
         placeholder = st.empty()
-        results = []
-
+        results_list = []
+        
         for i, email in enumerate(emails):
-            result = verify_email(email)
-            results.append(result)
-
-            placeholder.dataframe(pd.DataFrame(results))
-            st.progress((i+1)/len(emails))
-            time.sleep(0.05)
+            result = verify_email(email, model, label_map)
+            results_list.append(result)
+            
+            # Real-time display
+            progress = (i+1)/len(emails)
+            placeholder.dataframe(pd.DataFrame(results_list))
+            st.progress(progress)
+            st.write(f"Processing {i+1}/{len(emails)}: {email} → {result['status']} | AI Risk {result['ai_risk_score']:.1f} | Confidence {result['ai_confidence']:.1f}")
+            
+            time.sleep(0.1)  # simulate delay for demo
 
 # ==========================
 # PUBLIC PAGE
 # ==========================
-
 else:
     st.title("📧 AI Bulk Email Verification")
-
     st.markdown("""
     ### Free Plan
-    - 600 emails per 24h
-    - CSV Upload
-    - For unlimited plan: numanriaz4309@gmail.com
+    - 600 emails per IP every 24h
+    - Drag & Drop CSV up to 200MB
+    - For unlimited verification contact: **numanriaz4309@gmail.com**
     """)
-
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
-
+    uploaded_file = st.file_uploader("Drag & Drop CSV (Max 200MB)", type=["csv"])
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
-        emails = df[df.columns[0]].dropna().astype(str).tolist()
-
+        email_column = df.columns[0]
+        emails = df[email_column].dropna().astype(str).tolist()
         if not check_rate_limit(ip, len(emails)):
             st.error("Free limit exceeded (600 emails / 24h).")
         else:
             placeholder = st.empty()
-            results = []
-
+            results_list = []
             for i, email in enumerate(emails):
-                result = verify_email(email)
-                results.append(result)
-
-                placeholder.dataframe(pd.DataFrame(results))
-                st.progress((i+1)/len(emails))
-                time.sleep(0.05)
-streamlit
-pandas
-dnspython
-sqlalchemy
+                result = verify_email(email, model, label_map)
+                results_list.append(result)
+                progress = (i+1)/len(emails)
+                placeholder.dataframe(pd.DataFrame(results_list))
+                st.progress(progress)
+                st.write(f"Processing {i+1}/{len(emails)}: {email} → {result['status']} | AI Risk {result['ai_risk_score']:.1f} | Confidence {result['ai_confidence']:.1f}")
+                time.sleep(0.1)
