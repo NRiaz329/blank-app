@@ -59,6 +59,7 @@ class PublicUsage(Base):
     count = Column(Integer, default=0)
     reset = Column(DateTime, default=datetime.utcnow)
 
+# CREATE TABLES IMMEDIATELY
 Base.metadata.create_all(bind=engine)
 
 # ==========================
@@ -66,16 +67,10 @@ Base.metadata.create_all(bind=engine)
 # ==========================
 
 ADMIN_PASSWORD = "090078601"
-
-PLAN_LIMITS = {
-    "Free": 600,
-    "Pro": 5000,
-    "Enterprise": 100000
-}
+PLAN_LIMITS = {"Free": 600, "Pro": 5000, "Enterprise": 100000}
 
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
-
 if "client_id" not in st.session_state:
     st.session_state.client_id = None
 
@@ -97,7 +92,7 @@ def get_client_ip():
         return "local_user"
 
 # ==========================
-# EMAIL VALIDATION
+# EMAIL VALIDATION & AI
 # ==========================
 
 def validate_syntax(email):
@@ -125,20 +120,18 @@ def ai_score(email):
 
     risk_score = min(risk_score, 100)
     confidence = 100 - risk_score
-
     if risk_score < 40:
         status = "VALID"
     elif risk_score < 70:
         status = "RISKY"
     else:
         status = "INVALID"
-
     return risk_score, confidence, status
 
 def verify_email(email, client=None, ip=None):
     email = email.strip()
 
-    # Check if public user
+    # PUBLIC LIMIT
     if client is None:
         usage = db.query(PublicUsage).filter_by(ip=ip).first()
         now = datetime.utcnow()
@@ -146,16 +139,14 @@ def verify_email(email, client=None, ip=None):
             usage = PublicUsage(ip=ip, count=0, reset=now + timedelta(hours=24))
             db.add(usage)
             db.commit()
-
         if now > usage.reset:
             usage.count = 0
             usage.reset = now + timedelta(hours=24)
             db.commit()
-
         if usage.count >= 600:
             return None
 
-    # Check if client
+    # CLIENT LIMIT
     if client:
         if client.credits <= 0:
             return None
@@ -201,7 +192,7 @@ def verify_email(email, client=None, ip=None):
     }
 
 # ==========================
-# UI
+# STREAMLIT UI
 # ==========================
 
 st.set_page_config(page_title="AI Email Verifier SaaS", layout="wide")
@@ -253,7 +244,6 @@ if st.session_state.is_admin:
     new_user = st.text_input("Username")
     new_pass = st.text_input("Password", type="password")
     new_plan = st.selectbox("Plan", ["Free", "Pro", "Enterprise"])
-
     if st.button("Create Client"):
         if not db.query(Client).filter_by(username=new_user).first():
             credits = PLAN_LIMITS[new_plan]
@@ -268,25 +258,24 @@ if st.session_state.is_admin:
             st.success(f"Client '{new_user}' Created")
 
     st.subheader("Manage Clients")
-    clients = db.query(Client).all()
+    try:
+        clients = db.query(Client).all()
+    except:
+        clients = []
 
     for c in clients:
         st.write(f"User: {c.username} | Plan: {c.plan} | Credits: {c.credits} | Active: {c.is_active}")
-
         col1, col2, col3 = st.columns(3)
-
         with col1:
             if st.button(f"Add 1000 Credits to {c.username}", key=f"add_{c.id}"):
                 c.credits += 1000
                 db.commit()
                 st.success(f"Credits Added to {c.username}")
-
         with col2:
             if st.button(f"Deactivate {c.username}", key=f"deactivate_{c.id}"):
                 c.is_active = False
                 db.commit()
                 st.success(f"{c.username} Deactivated")
-
         with col3:
             if st.button(f"Delete {c.username}", key=f"delete_{c.id}"):
                 db.query(EmailVerification).filter_by(client_id=c.id).delete()
@@ -301,18 +290,14 @@ if st.session_state.is_admin:
 elif st.session_state.client_id:
 
     client = db.query(Client).filter_by(id=st.session_state.client_id).first()
-
     st.title("📧 Client Dashboard")
     st.markdown(f"**Plan:** {client.plan}  |  **Credits Remaining:** {client.credits}")
 
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
-
     if uploaded_file:
-
         df = pd.read_csv(uploaded_file)
         emails = df[df.columns[0]].dropna().astype(str).tolist()
         results = []
-
         for email in emails:
             result = verify_email(email, client=client)
             if result:
@@ -320,7 +305,6 @@ elif st.session_state.client_id:
             else:
                 st.error("No credits remaining.")
                 break
-
         if results:
             result_df = pd.DataFrame(results)
             st.dataframe(result_df)
@@ -330,23 +314,20 @@ elif st.session_state.client_id:
     st.subheader("Verification History")
     history = db.query(EmailVerification).filter_by(client_id=client.id).all()
     if history:
-        st.dataframe(pd.DataFrame([
-            {
-                "Email": h.email,
-                "Status": h.status,
-                "Risk": h.ai_risk_score,
-                "Confidence": h.ai_confidence,
-                "Date": h.timestamp
-            } for h in history
-        ]))
+        st.dataframe(pd.DataFrame([{
+            "Email": h.email,
+            "Status": h.status,
+            "Risk": h.ai_risk_score,
+            "Confidence": h.ai_confidence,
+            "Date": h.timestamp
+        } for h in history]))
 
 # ==========================
-# PUBLIC FREE PAGE
+# PUBLIC FREE USAGE
 # ==========================
 
 else:
     st.title("🚀 AI Email Verification SaaS - Free Usage")
-
     st.markdown("""
     ### Free Plan for Public
     - 600 emails per IP per 24 hours
@@ -354,14 +335,11 @@ else:
     - AI-powered risk scoring
     - Contact us to upgrade for more credits
     """)
-
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
-
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
         emails = df[df.columns[0]].dropna().astype(str).tolist()
         results = []
-
         for email in emails:
             result = verify_email(email, client=None, ip=ip)
             if result:
@@ -369,7 +347,6 @@ else:
             else:
                 st.error("Free limit of 600 emails per 24h reached for your IP")
                 break
-
         if results:
             result_df = pd.DataFrame(results)
             st.dataframe(result_df)
