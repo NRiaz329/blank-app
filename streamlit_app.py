@@ -1,7 +1,9 @@
 """
 AI Email Verification SaaS
 Admin Password: 090078601
-Client Portal Enabled
+Plans: Free / Pro / Enterprise
+Credits + Usage Limits + CSV Download
+Free 600 emails per IP / 24h for public
 """
 
 import streamlit as st
@@ -11,7 +13,7 @@ import dns.resolver
 import random
 import hashlib
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -33,19 +35,29 @@ class Client(Base):
     id = Column(Integer, primary_key=True)
     username = Column(String, unique=True)
     password = Column(String)
+    plan = Column(String, default="Free")
+    credits = Column(Integer, default=600)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class EmailVerification(Base):
     __tablename__ = "emails"
     id = Column(Integer, primary_key=True)
-    client_id = Column(Integer, ForeignKey("clients.id"))
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    ip = Column(String, nullable=True)
     email = Column(String)
     status = Column(String)
     safe_to_send = Column(Boolean)
     ai_confidence = Column(Float)
     ai_risk_score = Column(Float)
     timestamp = Column(DateTime, default=datetime.utcnow)
+
+class PublicUsage(Base):
+    __tablename__ = "public_usage"
+    id = Column(Integer, primary_key=True)
+    ip = Column(String)
+    count = Column(Integer, default=0)
+    reset = Column(DateTime, default=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
 
@@ -54,6 +66,12 @@ Base.metadata.create_all(bind=engine)
 # ==========================
 
 ADMIN_PASSWORD = "090078601"
+
+PLAN_LIMITS = {
+    "Free": 600,
+    "Pro": 5000,
+    "Enterprise": 100000
+}
 
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
@@ -67,6 +85,16 @@ if "client_id" not in st.session_state:
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
+
+# ==========================
+# UTILITIES
+# ==========================
+
+def get_client_ip():
+    try:
+        return st.runtime.scriptrunner.get_script_run_ctx().request.remote_addr
+    except:
+        return "local_user"
 
 # ==========================
 # EMAIL VALIDATION
@@ -86,7 +114,6 @@ def validate_mx(domain):
 def ai_score(email):
     domain_len = len(email.split("@")[1])
     local_len = len(email.split("@")[0])
-
     risk_score = random.uniform(5, 35)
 
     if domain_len < 4:
@@ -108,9 +135,32 @@ def ai_score(email):
 
     return risk_score, confidence, status
 
-def verify_email(email, client_id):
+def verify_email(email, client=None, ip=None):
     email = email.strip()
 
+    # Check if public user
+    if client is None:
+        usage = db.query(PublicUsage).filter_by(ip=ip).first()
+        now = datetime.utcnow()
+        if not usage:
+            usage = PublicUsage(ip=ip, count=0, reset=now + timedelta(hours=24))
+            db.add(usage)
+            db.commit()
+
+        if now > usage.reset:
+            usage.count = 0
+            usage.reset = now + timedelta(hours=24)
+            db.commit()
+
+        if usage.count >= 600:
+            return None
+
+    # Check if client
+    if client:
+        if client.credits <= 0:
+            return None
+
+    # Email validation
     if not validate_syntax(email):
         status = "INVALID"
     else:
@@ -124,35 +174,44 @@ def verify_email(email, client_id):
     safe_to_send = risk_score < 50
 
     record = EmailVerification(
-        client_id=client_id,
+        client_id=client.id if client else None,
+        ip=ip if not client else None,
         email=email,
         status=status,
         safe_to_send=safe_to_send,
         ai_confidence=confidence,
         ai_risk_score=risk_score
     )
+
     db.add(record)
+
+    if client:
+        client.credits -= 1
+    else:
+        usage.count += 1
+
     db.commit()
 
     return {
-        "email": email,
-        "status": status,
-        "safe_to_send": safe_to_send,
-        "ai_confidence": round(confidence, 2),
-        "ai_risk_score": round(risk_score, 2)
+        "Email": email,
+        "Status": status,
+        "Risk Score": round(risk_score, 2),
+        "Confidence": round(confidence, 2),
+        "Safe To Send": safe_to_send
     }
 
 # ==========================
 # UI
 # ==========================
 
-st.set_page_config(page_title="AI Email Verifier", layout="wide")
+st.set_page_config(page_title="AI Email Verifier SaaS", layout="wide")
+ip = get_client_ip()
 
 with st.sidebar:
 
     st.markdown("## 🔐 Login")
 
-    # Admin Login
+    # Admin login
     if not st.session_state.is_admin:
         admin_pass = st.text_input("Admin Password", type="password")
         if admin_pass == ADMIN_PASSWORD:
@@ -163,7 +222,7 @@ with st.sidebar:
         if st.button("Logout Admin"):
             st.session_state.is_admin = False
 
-    # Client Login
+    # Client login
     if not st.session_state.client_id:
         st.markdown("### Client Login")
         username = st.text_input("Username")
@@ -188,31 +247,52 @@ with st.sidebar:
 # ==========================
 
 if st.session_state.is_admin:
-    st.title("🛡 Admin Panel")
+    st.title("🛡 Admin Dashboard")
 
-    st.subheader("Create New Client")
-    new_user = st.text_input("New Username")
-    new_pass = st.text_input("New Password", type="password")
+    st.subheader("Create Client")
+    new_user = st.text_input("Username")
+    new_pass = st.text_input("Password", type="password")
+    new_plan = st.selectbox("Plan", ["Free", "Pro", "Enterprise"])
 
     if st.button("Create Client"):
-        if new_user and new_pass:
-            if db.query(Client).filter_by(username=new_user).first():
-                st.error("Username already exists")
-            else:
-                client = Client(
-                    username=new_user,
-                    password=hash_password(new_pass)
-                )
-                db.add(client)
-                db.commit()
-                st.success("Client Created Successfully")
+        if not db.query(Client).filter_by(username=new_user).first():
+            credits = PLAN_LIMITS[new_plan]
+            client = Client(
+                username=new_user,
+                password=hash_password(new_pass),
+                plan=new_plan,
+                credits=credits
+            )
+            db.add(client)
+            db.commit()
+            st.success(f"Client '{new_user}' Created")
 
-    st.subheader("All Clients")
+    st.subheader("Manage Clients")
     clients = db.query(Client).all()
-    st.dataframe(pd.DataFrame([
-        {"ID": c.id, "Username": c.username, "Active": c.is_active}
-        for c in clients
-    ]))
+
+    for c in clients:
+        st.write(f"User: {c.username} | Plan: {c.plan} | Credits: {c.credits} | Active: {c.is_active}")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            if st.button(f"Add 1000 Credits to {c.username}", key=f"add_{c.id}"):
+                c.credits += 1000
+                db.commit()
+                st.success(f"Credits Added to {c.username}")
+
+        with col2:
+            if st.button(f"Deactivate {c.username}", key=f"deactivate_{c.id}"):
+                c.is_active = False
+                db.commit()
+                st.success(f"{c.username} Deactivated")
+
+        with col3:
+            if st.button(f"Delete {c.username}", key=f"delete_{c.id}"):
+                db.query(EmailVerification).filter_by(client_id=c.id).delete()
+                db.delete(c)
+                db.commit()
+                st.warning(f"{c.username} and all their data deleted")
 
 # ==========================
 # CLIENT PORTAL
@@ -220,54 +300,78 @@ if st.session_state.is_admin:
 
 elif st.session_state.client_id:
 
-    st.title("📧 Client Email Verification Portal")
+    client = db.query(Client).filter_by(id=st.session_state.client_id).first()
+
+    st.title("📧 Client Dashboard")
+    st.markdown(f"**Plan:** {client.plan}  |  **Credits Remaining:** {client.credits}")
+
+    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+
+    if uploaded_file:
+
+        df = pd.read_csv(uploaded_file)
+        emails = df[df.columns[0]].dropna().astype(str).tolist()
+        results = []
+
+        for email in emails:
+            result = verify_email(email, client=client)
+            if result:
+                results.append(result)
+            else:
+                st.error("No credits remaining.")
+                break
+
+        if results:
+            result_df = pd.DataFrame(results)
+            st.dataframe(result_df)
+            csv = result_df.to_csv(index=False).encode("utf-8")
+            st.download_button("⬇ Download Verified CSV", csv, "verified_results.csv", "text/csv")
+
+    st.subheader("Verification History")
+    history = db.query(EmailVerification).filter_by(client_id=client.id).all()
+    if history:
+        st.dataframe(pd.DataFrame([
+            {
+                "Email": h.email,
+                "Status": h.status,
+                "Risk": h.ai_risk_score,
+                "Confidence": h.ai_confidence,
+                "Date": h.timestamp
+            } for h in history
+        ]))
+
+# ==========================
+# PUBLIC FREE PAGE
+# ==========================
+
+else:
+    st.title("🚀 AI Email Verification SaaS - Free Usage")
+
+    st.markdown("""
+    ### Free Plan for Public
+    - 600 emails per IP per 24 hours
+    - Drag & Drop CSV
+    - AI-powered risk scoring
+    - Contact us to upgrade for more credits
+    """)
 
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
         emails = df[df.columns[0]].dropna().astype(str).tolist()
-
-        placeholder = st.empty()
         results = []
 
-        for i, email in enumerate(emails):
-            result = verify_email(email, st.session_state.client_id)
-            results.append(result)
+        for email in emails:
+            result = verify_email(email, client=None, ip=ip)
+            if result:
+                results.append(result)
+            else:
+                st.error("Free limit of 600 emails per 24h reached for your IP")
+                break
 
-            placeholder.dataframe(pd.DataFrame(results))
-            st.progress((i + 1) / len(emails))
-            time.sleep(0.05)
-
-    st.subheader("Your History")
-    history = db.query(EmailVerification).filter_by(
-        client_id=st.session_state.client_id
-    ).all()
-
-    if history:
-        st.dataframe(pd.DataFrame([
-            {
-                "Email": h.email,
-                "Status": h.status,
-                "Risk": round(h.ai_risk_score, 2),
-                "Confidence": round(h.ai_confidence, 2),
-                "Safe": h.safe_to_send,
-                "Date": h.timestamp
-            }
-            for h in history
-        ]))
-
-# ==========================
-# PUBLIC LANDING PAGE
-# ==========================
-
-else:
-    st.title("🚀 AI Email Verification SaaS")
-
-    st.markdown("""
-    ### Client Portal Access
-    - Secure login for each client
-    - Private verification dashboard
-    - AI-powered risk scoring
-    - Contact us for extended access and higher limits
-    """)
+        if results:
+            result_df = pd.DataFrame(results)
+            st.dataframe(result_df)
+            csv = result_df.to_csv(index=False).encode("utf-8")
+            st.download_button("⬇ Download Verified CSV", csv, "verified_results.csv", "text/csv")
