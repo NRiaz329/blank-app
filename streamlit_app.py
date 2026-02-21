@@ -54,33 +54,51 @@ class PublicUsage(Base):
     reset = Column(DateTime, default=datetime.utcnow)
 
 # ==========================
-# DATABASE MIGRATION
+# DATABASE MIGRATION & INITIALIZATION
 # ==========================
 
-def migrate_database():
-    """Add missing columns to existing tables"""
-    inspector = inspect(engine)
-    
-    # Check if 'reason' column exists in emails table
-    columns = [col['name'] for col in inspector.get_columns('emails')]
-    
-    if 'reason' not in columns:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE emails ADD COLUMN reason TEXT"))
-            conn.commit()
-            print("✅ Added 'reason' column to emails table")
-
-# Import text for raw SQL
 from sqlalchemy import text
 
-# Run migration before creating tables
-try:
-    migrate_database()
-except Exception as e:
-    print(f"Migration note: {e}")
+def safe_migrate_database():
+    """Safely migrate database with proper error handling"""
+    try:
+        inspector = inspect(engine)
+        
+        # Check if tables exist first
+        existing_tables = inspector.get_table_names()
+        
+        # If emails table exists, check for reason column
+        if 'emails' in existing_tables:
+            columns = [col['name'] for col in inspector.get_columns('emails')]
+            
+            if 'reason' not in columns:
+                # Add reason column
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE emails ADD COLUMN reason TEXT"))
+                print("✅ Added 'reason' column to emails table")
+        
+        # If tables don't exist, they will be created by create_all
+        return True
+    except Exception as e:
+        print(f"Migration info: {e}")
+        return True  # Continue anyway, create_all will handle it
 
-# Create all tables
-Base.metadata.create_all(bind=engine)
+# Run safe migration
+safe_migrate_database()
+
+# Create all tables (safe to run even if tables exist)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    print(f"Database initialization: {e}")
+    # If there's a conflict, try to recreate only missing tables
+    try:
+        # This creates only tables that don't exist yet
+        Base.metadata.create_all(bind=engine, checkfirst=True)
+    except Exception as e2:
+        print(f"Database error: {e2}")
+        # Last resort: recommend deleting the database file
+        st.error("⚠️ Database error detected. If this persists, delete 'email_verifier.db' and restart the app.")
 
 # ==========================
 # CONFIG
@@ -1313,6 +1331,49 @@ if st.session_state.is_admin:
         col3.metric("Risky", risky_count)
         col4.metric("Invalid", invalid_count)
         col5.metric("Safe to Send", safe_to_send)
+        
+        # Database maintenance section
+        st.markdown("---")
+        st.markdown("### 🛠️ Database Maintenance")
+        
+        col_maint1, col_maint2 = st.columns(2)
+        
+        with col_maint1:
+            st.warning("⚠️ **Clear Verification History**")
+            st.caption("This will delete all email verification records but keep client accounts.")
+            confirm_clear = st.checkbox("I confirm clearing verification history", key="confirm_clear_verifications")
+            if st.button("🗑️ Clear Verification History", type="secondary"):
+                if confirm_clear:
+                    session = SessionLocal()
+                    try:
+                        session.query(EmailVerification).delete()
+                        session.commit()
+                        st.success("✅ Verification history cleared successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error: {e}")
+                    finally:
+                        session.close()
+                else:
+                    st.error("⚠️ Please confirm by checking the box")
+        
+        with col_maint2:
+            st.info("💡 **Database Info**")
+            st.caption("If you encounter database errors, try these solutions:")
+            st.markdown("""
+                1. Clear verification history (keeps clients)
+                2. Contact admin to reset database
+                3. In production: Delete `email_verifier.db` file and restart
+            """)
+            
+            # Show database file size if accessible
+            try:
+                import os
+                if os.path.exists('email_verifier.db'):
+                    size = os.path.getsize('email_verifier.db') / 1024  # KB
+                    st.metric("Database Size", f"{size:.2f} KB")
+            except:
+                pass
 
 # ==========================
 # CLIENT / PUBLIC CSV PROCESSING
